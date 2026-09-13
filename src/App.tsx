@@ -391,6 +391,7 @@ export default function App() {
           onCreateTag={addCustomTag}
           onDeleteTag={deleteTag}
           onLocalModDeleted={handleLocalModDeleted}
+          onRefresh={refresh}
           onClose={() => setSelected(null)}
           onToast={pushToast}
           onModUpdate={updateMod}

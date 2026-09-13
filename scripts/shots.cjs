@@ -139,6 +139,83 @@ app.whenReady().then(async () => {
   })()`);
   await sleep(400);
 
+  /*
+   * 回归测试：开着「有更新」筛选把工坊 mod 全部更新完之后，
+   * 列表不能变空、筛选必须能自动取消。
+   * 曾经的 bug：更新完 outdatedCount 归零 → 按钮不再渲染 → 但筛选条件还生效 →
+   * 列表空掉且界面上没有任何地方能取消它。
+   */
+  const libState = `(() => ({
+    count: (document.querySelector('.result-count') || {}).textContent || null,
+    cards: document.querySelectorAll('.card').length,
+    outdatedBtn: (() => {
+      const b = Array.from(document.querySelectorAll('.toolbar .btn')).find((x) =>
+        x.textContent.includes('有更新')
+      );
+      return b ? { text: b.textContent.trim(), active: b.classList.contains('primary') } : null;
+    })()
+  }))()`;
+
+  const baseline = await win.webContents.executeJavaScript(libState);
+  console.log('lib-baseline=' + JSON.stringify(baseline));
+
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.toolbar .btn')).find((x) =>
+      x.textContent.includes('有更新')
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(500);
+  const filteredState = await win.webContents.executeJavaScript(libState);
+  console.log('lib-filtered=' + JSON.stringify(filteredState));
+
+  // 执行一次备份：mock 里会把已有本地副本更新掉，「有更新」数量随之归零
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.topbar .btn')).find((x) =>
+      x.textContent.includes('备份工坊')
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(1200);
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot .btn')).find((x) =>
+      x.textContent.includes('开始备份')
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(1500);
+  console.log(
+    'backup-run=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const nums = Array.from(document.querySelectorAll('.bk-num')).map((x) => x.textContent.trim());
+          const foot = Array.from(document.querySelectorAll('.modal-foot .btn')).map((x) => x.textContent.trim());
+          return { nums, foot };
+        })()`)
+      )
+  );
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot .btn')).find(
+      (x) => x.textContent.trim() === '关闭'
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(900);
+
+  const afterUpdate = await win.webContents.executeJavaScript(libState);
+  console.log('lib-after-update=' + JSON.stringify(afterUpdate));
+  console.log(
+    'update-filter-regression=' +
+      JSON.stringify({
+        更新前总数: baseline.cards,
+        筛选后: filteredState.cards,
+        更新后: afterUpdate.cards,
+        列表没变空: afterUpdate.cards > 0,
+        恢复成完整列表: afterUpdate.cards === baseline.cards,
+        筛选按钮已消失: !afterUpdate.outdatedBtn
+      })
+  );
+
   // 滚动验证：卡片区必须能滚，且工具栏保持可见
   const scroll = await win.webContents.executeJavaScript(`(() => {
     const c = document.querySelector('.lib-scroll');

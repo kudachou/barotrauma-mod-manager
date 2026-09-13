@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CategoryData, ModInfo } from '../types';
 import ModCard from './ModCard';
 import { IconAlert, IconSearch } from './Icons';
@@ -38,12 +38,32 @@ export default function LibraryView({
     [mods]
   );
 
+  /*
+   * 筛选条件可能因为数据变化而「失效」：更新完就没有「有更新」的 mod 了，
+   * 或者某个分类下的 mod 全被删了。这时对应的按钮会消失 —— 如果还继续套用这个条件，
+   * 用户就会被卡在一个空列表里，而且界面上找不到地方取消它。
+   * 所以这里统一做一次有效性校正，并且把失效的原始状态也清掉
+   * （否则数据恢复后筛选会「自己」又生效）。
+   */
+  const effectiveCat = cat === '全部' || catList.includes(cat) ? cat : '全部';
+  const effectiveOnlyOutdated = onlyOutdated && outdatedCount > 0;
+
+  useEffect(() => {
+    if (cat !== '全部' && !catList.includes(cat)) setCat('全部');
+  }, [cat, catList]);
+
+  useEffect(() => {
+    if (onlyOutdated && outdatedCount === 0) setOnlyOutdated(false);
+  }, [onlyOutdated, outdatedCount]);
+
   const filtered = useMemo(() => {
     let out = mods;
     if (source !== 'all') out = out.filter((m) => m.source === source);
-    if (cat !== '全部')
-      out = out.filter((m) => m.categories.includes(cat) || m.autoCategories.includes(cat));
-    if (onlyOutdated) out = out.filter((m) => m.counterpart?.status === 'older');
+    if (effectiveCat !== '全部')
+      out = out.filter(
+        (m) => m.categories.includes(effectiveCat) || m.autoCategories.includes(effectiveCat)
+      );
+    if (effectiveOnlyOutdated) out = out.filter((m) => m.counterpart?.status === 'older');
     const ql = q.trim().toLowerCase();
     if (ql) {
       out = out.filter(
@@ -72,7 +92,7 @@ export default function LibraryView({
         break;
     }
     return sorted;
-  }, [mods, source, cat, onlyOutdated, q, sort]);
+  }, [mods, source, effectiveCat, effectiveOnlyOutdated, q, sort]);
 
   const localCount = mods.filter((m) => m.source === 'local').length;
   const wsCount = mods.filter((m) => m.source === 'workshop').length;
@@ -106,7 +126,7 @@ export default function LibraryView({
 
         {outdatedCount > 0 && (
           <button
-            className={`btn sm ${onlyOutdated ? 'primary' : ''}`}
+            className={`btn sm ${effectiveOnlyOutdated ? 'primary' : ''}`}
             onClick={() => setOnlyOutdated((v) => !v)}
             title="只看创意工坊有更新的本地 mod"
           >
@@ -134,7 +154,7 @@ export default function LibraryView({
 
       <div className="chips-row">
         {catList.map((c) => {
-          const on = cat === c;
+          const on = effectiveCat === c;
           return (
             <button
               key={c}

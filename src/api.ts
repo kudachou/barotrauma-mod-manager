@@ -13,7 +13,8 @@ import type {
   BackupResult,
   LocalModFootprint,
   DeleteLocalModResult,
-  WorkshopDetails
+  WorkshopDetails,
+  ModInfo
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -83,11 +84,18 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
 
   scan: async (): Promise<ScanResult> => {
     refreshUsedIn();
+    // 每次返回全新的数组/对象，跟真实后端 scanAll() 的行为一致。
+    // 否则 useMemo 按引用比较会认为数据没变，界面不会重算 —— 比如更新完 mod 后
+    // 「有更新」的数量不会往下掉。
     return {
-      mods: state.mods,
+      mods: [...state.mods],
       modlists: summaries(),
-      categories: state.categories,
-      settings: state.settings,
+      categories: {
+        mods: { ...state.categories.mods },
+        custom: [...state.categories.custom],
+        removed: [...state.categories.removed]
+      },
+      settings: { ...state.settings },
       warnings: []
     };
   },
@@ -199,33 +207,57 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   },
 
   planWorkshopBackup: async (): Promise<BackupPlan> => {
+    // 已经有本地副本的（按 steamworkshopid 认）算「更新」，和真实后端一致
+    const localByWsId = new Map<string, ModInfo>();
+    for (const m of state.mods) {
+      if (m.source === 'local' && m.steamworkshopid && !localByWsId.has(m.steamworkshopid)) {
+        localByWsId.set(m.steamworkshopid, m);
+      }
+    }
+
     const items = state.mods
       .filter((m) => m.source === 'workshop')
-      .map((m, i) => ({
-        id: m.id,
-        name: m.name,
-        folder: m.name,
-        source: m.path,
-        bytes: 32 * 1024 * 1024 + i * 1_500_000,
-        files: 120 + i * 7,
-        existing: false
-      }));
+      .map((m, i) => {
+        const local = localByWsId.get(m.id);
+        return {
+          id: m.id,
+          name: m.name,
+          folder: local ? local.id : m.name,
+          source: m.path,
+          bytes: 32 * 1024 * 1024 + i * 1_500_000,
+          files: 120 + i * 7,
+          existing: !!local
+        };
+      });
+
+    const updateCount = items.filter((x) => x.existing).length;
     return {
       items,
       skipped: [],
       totalBytes: items.reduce((s, x) => s + x.bytes, 0),
       totalFiles: items.reduce((s, x) => s + x.files, 0),
-      updateCount: 0,
-      newCount: items.length
+      updateCount,
+      newCount: items.length - updateCount
     };
   },
   startWorkshopBackup: async (): Promise<BackupResult> => {
     const plan = await mockApi.planWorkshopBackup();
+    // 预览模式把「更新已有本地副本」这一步做实：版本对齐、对比状态变为一致，
+    // 这样界面上的「有更新」数量会真的往下掉，相关逻辑才测得到
+    for (const item of plan.items) {
+      if (!item.existing) continue;
+      const local = state.mods.find((x) => x.source === 'local' && x.steamworkshopid === item.id);
+      const ws = state.mods.find((x) => x.source === 'workshop' && x.id === item.id);
+      if (local && ws && local.counterpart) {
+        local.modVersion = ws.modVersion;
+        local.counterpart = { ...local.counterpart, version: ws.modVersion, status: 'same' };
+      }
+    }
     return {
       done: plan.items.length,
       total: plan.items.length,
       bytesDone: plan.totalBytes,
-      snapshotted: 0,
+      snapshotted: plan.updateCount,
       errors: [],
       folders: plan.items.map((x) => x.folder),
       skipped: []
@@ -369,12 +401,18 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
     return m ? { local: m, workshop: m.counterpart } : null;
   },
   overwriteLocalWithWorkshop: async (
-    _localId?: string,
-    _workshopId?: string
-  ): Promise<{ ok: true; backup: string }> => ({
-    ok: true,
-    backup: '（预览模式未真正覆盖）'
-  }),
+    localId?: string,
+    workshopId?: string
+  ): Promise<{ ok: true; snapshotId: string }> => {
+    // 预览模式把覆盖做实：本地版本对齐工坊版，对比状态变为一致
+    const local = state.mods.find((x) => x.source === 'local' && x.id === localId);
+    const ws = state.mods.find((x) => x.source === 'workshop' && x.id === workshopId);
+    if (local && ws && local.counterpart) {
+      local.modVersion = ws.modVersion;
+      local.counterpart = { ...local.counterpart, version: ws.modVersion, status: 'same' };
+    }
+    return { ok: true, snapshotId: 'preview' };
+  },
   copyWorkshopToLocal: async (
     _workshopId?: string,
     _newName?: string

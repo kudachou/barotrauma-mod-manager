@@ -51,7 +51,8 @@ export default function ModDetailModal({
   onCreateModlistWith,
   onCreateTag,
   onDeleteTag,
-  onLocalModDeleted
+  onLocalModDeleted,
+  onRefresh
 }: {
   mod: ModInfo;
   allCategories: string[];
@@ -69,6 +70,8 @@ export default function ModDetailModal({
   onDeleteTag: (name: string) => Promise<void>;
   /** 删除本地 mod 成功后调用：关闭弹窗并刷新列表 */
   onLocalModDeleted: () => void;
+  /** 覆盖 / 复制之后重新扫描，避免卡片还显示旧版本 */
+  onRefresh: () => Promise<void>;
 }) {
   const [tags, setTags] = useState<string[]>(mod.categories);
   const [preview, setPreview] = useState<string | null>(mod.preview);
@@ -205,6 +208,7 @@ export default function ModDetailModal({
     try {
       await api.overwriteLocalWithWorkshop(mod.id, cp?.id);
       await loadSnapshots();
+      await onRefresh();
       onToast('ok', '已用创意工坊版覆盖本地', '覆盖前的本地版本已存成快照，可在「历史版本」里回滚');
     } catch (e: any) {
       onToast('err', '覆盖失败', String(e?.message || e));
