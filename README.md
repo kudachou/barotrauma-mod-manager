@@ -26,6 +26,17 @@
 - 设置封面、打开文件夹、跳转工坊页面
 - 用创意工坊版覆盖本地版（自动备份）、把工坊版复制为新本地 mod
 
+**启动游戏**
+- 顶部「启动游戏」一键拉起潜渊症；找不到 exe 时自动交回 Steam 启动
+
+**备份与回滚**
+- **一键备份所有工坊 mod 到本地**：全量复制进 `LocalMods`，工坊更新或下架都不怕
+  - 先规划再执行：先告诉你占多少磁盘、几个新建几个更新，确认后才动手
+  - 优先取游戏实际加载的那份（`WorkshopMods\Installed`），长任务带进度、可取消
+- **本地 mod 历史版本与回滚**：每个本地 mod 可以存多份快照，随时回到旧版本
+  - 手动「创建快照」；此外**每次覆盖工坊版、每次再次备份工坊 mod 之前都会自动留一份**
+  - 回滚前会先把当前状态也存成快照，所以**回滚本身也能撤销**
+
 **封面**
 - 创意工坊 mod 自动从 Steam 拉封面并缓存到本地，之后离线可用
 - 本地 mod 默认占位图，可手动指定
@@ -212,6 +223,9 @@ ERROR: Cannot create symbolic link … 客户端没有所需的特权。
   `ModManagerBackups\`（改名是瞬时的，不占额外空间），失败会自动回滚。
   备份刻意不放在 `LocalMods` 里，避免被游戏当成 mod 扫描到。
 - **合集文件名**做了目录穿越拦截。
+- **备份与快照**都放在 `LocalMods` 的**同级**目录 `ModManagerBackups\`：
+  `<mod 名>\<时间戳>\`。刻意不放进 `LocalMods`，避免被游戏当成 mod 扫描到；
+  也不要手改快照文件夹名（时间戳就是它的 id）。快照是完整副本，攒多了会占空间，可在详情页逐个删除。
 - 本工具自身的设置数据存在 `%AppData%\潜渊症Mod管理器\`：`settings.json`、`categories.json`、
   `previews\`（封面缓存）、`covers\`（手动设置的封面）。只在本机，不上传。
 
@@ -248,6 +262,8 @@ electron/            主进程
     steam.js         工坊封面（公开接口 + 缓存）
     categories.js    分类规则与标签持久化
     updater.js       自动更新（electron-updater + GitHub Releases）
+    backup.js        快照 / 回滚 / 一键备份工坊 mod
+    fsutil.js        复制目录、统计体积、文件名清洗等
 src/                 界面（React + TypeScript，无 UI 框架依赖，手写 CSS）
 scripts/             自检与工具脚本
 ```
