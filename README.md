@@ -21,7 +21,7 @@
 
 **Mod 详情**
 - **创意工坊描述**：直接显示 mod 作者写的描述（保留标题层级、列表、粗体斜体、链接、分隔线），
-  并附带订阅数 / 收藏数 / 浏览量 / 更新时间、工坊标签；长描述默认折叠
+  并附带订阅数 / 收藏数 / 浏览量 / 更新时间、工坊标签
 - 本地 ↔ 创意工坊版本对比
 - **加入合集**：点一下加入/移出任意合集，也能当场新建合集并加进去
 - **新建 / 删除分类标签**
@@ -293,7 +293,13 @@ node scripts/test-backend.cjs                # 后端逻辑（合成样本，不
 node scripts/test-preview.cjs                # 封面服务（需要联网）
 pnpm exec electron scripts/smoke-app.cjs     # 端到端（真实目录，只读）
 pnpm exec electron scripts/shots.cjs         # 界面截图 + 滚动/交互校验
+pnpm exec electron scripts/test-desc-scroll.cjs  # 工坊描述能否真的滚（发真实滚轮事件）
 ```
+
+`test-desc-scroll.cjs` 是为了一个具体的坑留下的：工坊描述很长时，光看
+「scrollHeight > clientHeight」这种静态条件会误判成"能滚"。必须用
+`webContents.sendInputEvent` 发**真实滚轮事件**，并确认滚轮坐标落在
+「描述区 ∩ 弹窗可见区」的交集里 —— 否则事件会打在标题栏上，测出假的"滚不动"。
 
 `test-backend.cjs` 覆盖了 `filelist.xml` 解析（含单引号、老格式 `version` 属性、BOM、
 以及 `modversion` 被 `gameversion` 误匹配的经典坑）、版本比较、合集往返、

@@ -90,14 +90,12 @@ export default function ModDetailModal({
   const [wsDetails, setWsDetails] = useState<WorkshopDetails | null>(null);
   const [wsLoading, setWsLoading] = useState(false);
   const [wsError, setWsError] = useState<string | null>(null);
-  const [wsExpanded, setWsExpanded] = useState(false);
 
   const isLocal = mod.source === 'local';
   /** 本地 mod 靠 filelist 里的 steamworkshopid 找到它对应的工坊条目 */
   const workshopId = mod.source === 'workshop' ? mod.id : mod.steamworkshopid;
 
   useEffect(() => {
-    setWsExpanded(false);
     setWsError(null);
     setWsDetails(null);
     if (!workshopId) return;
@@ -417,21 +415,12 @@ export default function ModDetailModal({
                   )}
 
                   {wsDetails.description?.trim() ? (
-                    <>
-                      <div className={`ws-wrap ${wsExpanded ? 'open' : ''}`}>
-                        <WorkshopText
-                          text={wsDetails.description}
-                          onOpenLink={(u) => void api.openExternal(u)}
-                        />
-                      </div>
-                      <button
-                        className="btn sm"
-                        style={{ marginTop: 10 }}
-                        onClick={() => setWsExpanded((v) => !v)}
-                      >
-                        {wsExpanded ? '收起描述' : '展开全部描述'}
-                      </button>
-                    </>
+                    <div className="ws-wrap">
+                      <WorkshopText
+                        text={wsDetails.description}
+                        onOpenLink={(u) => void api.openExternal(u)}
+                      />
+                    </div>
                   ) : (
                     <div className="hint" style={{ marginBottom: 0 }}>
                       作者没有填写描述。

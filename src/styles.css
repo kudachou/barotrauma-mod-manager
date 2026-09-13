@@ -1546,32 +1546,15 @@ select.input option {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * 描述不做折叠、不限制高度：内容整段铺开，由弹窗统一滚动。
+ * 之前做成「折叠 190px + 展开后内层滚动」，结果默认状态下描述被裁掉且滚不动。
+ */
 .ws-wrap {
-  position: relative;
-  max-height: 190px;
-  overflow: hidden;
   padding: 13px 15px;
   border-radius: 11px;
   background: rgba(8, 14, 26, 0.5);
   border: 1px solid var(--border);
-}
-
-/* 展开后不再限制高度：让整个弹窗滚，避免嵌套两层滚动条 */
-.ws-wrap.open {
-  max-height: none;
-  overflow: visible;
-}
-
-/* 折叠时底部渐隐，暗示还有内容 */
-.ws-wrap:not(.open)::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 52px;
-  background: linear-gradient(180deg, rgba(8, 14, 26, 0), rgba(8, 14, 26, 0.96));
-  pointer-events: none;
 }
 
 .ws-body {
