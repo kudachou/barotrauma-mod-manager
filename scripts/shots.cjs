@@ -398,6 +398,29 @@ app.whenReady().then(async () => {
   await sleep(400);
   await shot(win, '16-workshop-desc');
 
+  // 确认展开后「没有内层滚动条、由弹窗整体滚」
+  console.log(
+    'desc-scroll=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const w = document.querySelector('.ws-wrap');
+          const body = document.querySelector('.modal-body');
+          if (!w || !body) return { present: false };
+          const cs = getComputedStyle(w);
+          return {
+            expanded: w.classList.contains('open'),
+            wrapMaxHeight: cs.maxHeight,
+            wrapOverflowY: cs.overflowY,
+            wrapScrollable: w.scrollHeight > w.clientHeight + 2,
+            contentHeight: w.scrollHeight,
+            bodyScrollable: body.scrollHeight > body.clientHeight + 2,
+            bodyScrollHeight: body.scrollHeight,
+            bodyClientHeight: body.clientHeight
+          };
+        })()`)
+      )
+  );
+
   console.log('ERRORS ' + JSON.stringify(errors, null, 1));
   app.exit(0);
 });

@@ -1556,9 +1556,10 @@ select.input option {
   border: 1px solid var(--border);
 }
 
+/* 展开后不再限制高度：让整个弹窗滚，避免嵌套两层滚动条 */
 .ws-wrap.open {
-  max-height: 460px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 /* 折叠时底部渐隐，暗示还有内容 */
