@@ -287,6 +287,115 @@ try {
   );
   ok(typeof config.applyToGame === 'function', 'config 导出 applyToGame');
   ok(typeof detectPaths === 'function', 'detect 导出 detectPaths');
+
+  /* ------------------ 7. 快照 / 回滚 / 工坊备份（合成样本） ------------------ */
+
+  console.log('\n[7] 快照与回滚');
+
+  const bk = require('../electron/services/backup');
+  const bkRoot = path.join(TMP, 'bk');
+  const bkSettings = {
+    gameDir: bkRoot,
+    localModsDir: path.join(bkRoot, 'LocalMods'),
+    workshopModsDir: path.join(bkRoot, 'steam', '602960'),
+    installedWorkshopDir: path.join(bkRoot, 'installed')
+  };
+
+  const localMod = path.join(bkSettings.localModsDir, '我的mod');
+  fs.mkdirSync(localMod, { recursive: true });
+  fs.writeFileSync(
+    path.join(localMod, 'filelist.xml'),
+    '<contentpackage name="我的mod" modversion="1.0" steamworkshopid="111" />',
+    'utf8'
+  );
+  fs.writeFileSync(path.join(localMod, 'data.txt'), '第一版', 'utf8');
+
+  ok(bk.snapshotRoot(bkSettings) === path.join(bkRoot, 'ModManagerBackups'), '快照根目录在 LocalMods 同级');
+  ok(bk.listSnapshots(bkSettings, '我的mod').length === 0, '初始没有快照');
+
+  const snap1 = bk.createSnapshot(bkSettings, '我的mod', { label: '第一版' });
+  ok(!!snap1.id && snap1.files === 2, `创建快照成功（${snap1.files} 个文件）`);
+  ok(bk.listSnapshots(bkSettings, '我的mod')[0].label === '第一版', '快照备注被保存');
+
+  fs.writeFileSync(path.join(localMod, 'data.txt'), '第二版', 'utf8');
+  const snap2 = bk.createSnapshot(bkSettings, '我的mod', { label: '第二版' });
+  ok(snap2.id !== snap1.id, '同一秒内连续创建也不会撞 id');
+
+  const list = bk.listSnapshots(bkSettings, '我的mod');
+  ok(list.length === 2, `快照列表有 ${list.length} 条且按时间倒序`);
+
+  const snapCountBefore = bk.listSnapshots(bkSettings, '我的mod').length;
+  const restored = bk.restoreSnapshot(bkSettings, '我的mod', snap1.id);
+  ok(
+    fs.readFileSync(path.join(localMod, 'data.txt'), 'utf8') === '第一版',
+    '回滚后内容恢复成快照 1 的状态'
+  );
+  ok(!!restored.undoId, '回滚会返回一个「回滚前」快照 id（可撤销）');
+  ok(
+    bk.listSnapshots(bkSettings, '我的mod').length === snapCountBefore + 1,
+    '回滚前自动多存了一份快照，所以回滚本身也能撤销'
+  );
+
+  bk.deleteSnapshot(bkSettings, '我的mod', snap2.id);
+  ok(
+    bk.listSnapshots(bkSettings, '我的mod').every((s) => s.id !== snap2.id),
+    '删除快照生效'
+  );
+
+  let guard = false;
+  try {
+    bk.createSnapshot(bkSettings, '不存在的mod');
+  } catch {
+    guard = true;
+  }
+  ok(guard, '给不存在的本地 mod 打快照会报错');
+
+  console.log('\n[8] 一键备份工坊 mod 到本地');
+
+  writeMod(
+    path.join(bkSettings.workshopModsDir),
+    '111',
+    '<contentpackage name="工坊模组A" modversion="2.0" steamworkshopid="111" />'
+  );
+  writeMod(
+    path.join(bkSettings.workshopModsDir),
+    '222',
+    '<contentpackage name="工坊模组B" modversion="1.0" steamworkshopid="222" />'
+  );
+  writeMod(
+    path.join(bkSettings.installedWorkshopDir),
+    '222',
+    '<contentpackage name="工坊模组B" modversion="1.0" steamworkshopid="222" installed="true" />'
+  );
+
+  const plan = bk.planWorkshopBackup(bkSettings);
+  console.log(
+    `  计划: 共 ${plan.items.length} 个（新建 ${plan.newCount} / 更新 ${plan.updateCount}），` +
+      `跳过 ${plan.skipped.length}，合计 ${(plan.totalBytes / 1024).toFixed(1)} KB`
+  );
+  ok(plan.items.length === 2, '两个工坊 mod 都进了计划');
+  ok(plan.updateCount === 1, '已有本地副本的（按 steamworkshopid 认出）算作「更新」');
+  ok(plan.newCount === 1, '其余算作「新建」');
+  ok(plan.items.every((i) => i.folder && i.source), '每项都有目标文件夹和来源目录');
+
+  const result = bk.runWorkshopBackup(bkSettings, plan);
+  ok(result.done === 2 && result.errors.length === 0, `复制完成：${result.done} 个，0 错误`);
+  ok(
+    fs.existsSync(path.join(bkSettings.localModsDir, '我的mod', 'filelist.xml')),
+    '原本地 mod 还在'
+  );
+  ok(
+    fs.existsSync(path.join(bkSettings.localModsDir, '工坊模组B', 'filelist.xml')),
+    '新建了「工坊模组B」的本地副本'
+  );
+  ok(result.snapshotted === 1, '覆盖已有本地副本前留了 1 份快照');
+
+  const copiedFl = fs.readFileSync(
+    path.join(bkSettings.localModsDir, '工坊模组B', 'filelist.xml'),
+    'utf8'
+  );
+  ok(copiedFl.includes('name="工坊模组B"'), '复制后 filelist.xml 的 name 与文件夹名一致');
+  ok(copiedFl.includes('installed="true"'), '优先使用了游戏实际加载的 Installed 版本');
 } catch (e) {
   console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
   failures++;

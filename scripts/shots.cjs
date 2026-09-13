@@ -100,6 +100,45 @@ app.whenReady().then(async () => {
 
   await shot(win, '01-library');
 
+  // 顶部操作按钮
+  console.log(
+    'topbar-actions=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(
+          `Array.from(document.querySelectorAll('.topbar .btn')).map((b) => b.textContent.trim())`
+        )
+      )
+  );
+
+  // 备份工坊 mod 弹窗：规划结果
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.topbar .btn')).find((x) =>
+      x.textContent.includes('备份工坊')
+    );
+    if (b) b.click();
+    return !!b;
+  })()`);
+  await sleep(1500);
+  console.log(
+    'backup-modal=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => ({
+          open: !!document.querySelector('.modal'),
+          nums: Array.from(document.querySelectorAll('.bk-num')).map((x) => x.textContent.trim()),
+          labels: Array.from(document.querySelectorAll('.bk-label')).map((x) => x.textContent.trim()),
+          foot: Array.from(document.querySelectorAll('.modal-foot .btn')).map((x) => x.textContent.trim())
+        }))()`)
+      )
+  );
+  await shot(win, '14-backup-modal');
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot .btn')).find(
+      (x) => x.textContent.trim() === '取消'
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(400);
+
   // 滚动验证：卡片区必须能滚，且工具栏保持可见
   const scroll = await win.webContents.executeJavaScript(`(() => {
     const c = document.querySelector('.lib-scroll');
@@ -153,6 +192,23 @@ app.whenReady().then(async () => {
   await sleep(800);
   const modal = await win.webContents.executeJavaScript(`!!document.querySelector('.modal')`);
   console.log('modal=' + modal);
+  console.log(
+    'snapshot-section=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const t = Array.from(document.querySelectorAll('.modal .section-title')).find((x) =>
+            x.textContent.includes('历史版本')
+          );
+          return {
+            present: !!t,
+            text: t ? t.textContent.trim() : null,
+            hasCreate: !!Array.from(document.querySelectorAll('.modal .btn')).find((b) =>
+              b.textContent.includes('创建快照')
+            )
+          };
+        })()`)
+      )
+  );
   await shot(win, '04-detail');
 
   // 验证「加入合集」：点一个合集 chip，应出现提示

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import type { ModInfo, ModlistSummary } from '../types';
+import { useCallback, useEffect, useState } from 'react';
+import type { ModInfo, ModlistSummary, Snapshot } from '../types';
 import { api, imgSrc, placeholderHue } from '../api';
 import { categoryStyle } from '../categories';
 import { compareBadge, fmtDate, initials, modKey, uniq } from '../ui';
+import { humanSize } from './BackupModal';
 import {
   IconAlert,
   IconCheck,
@@ -11,8 +12,18 @@ import {
   IconDownload,
   IconExternal,
   IconFolder,
-  IconImage
+  IconImage,
+  IconPlus,
+  IconRefresh,
+  IconTrash
 } from './Icons';
+
+function fmtDateTime(ms: number): string {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 export default function ModDetailModal({
   mod,
@@ -51,6 +62,28 @@ export default function ModDetailModal({
   const [managingTags, setManagingTags] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [thumbBroken, setThumbBroken] = useState(false);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [snapBusy, setSnapBusy] = useState(false);
+  const [pendingRestore, setPendingRestore] = useState<string | null>(null);
+
+  const isLocal = mod.source === 'local';
+
+  const loadSnapshots = useCallback(async () => {
+    if (!isLocal) {
+      setSnapshots([]);
+      return;
+    }
+    try {
+      const r = await api.listSnapshots(mod.id);
+      setSnapshots(r.items);
+    } catch {
+      setSnapshots([]);
+    }
+  }, [isLocal, mod.id]);
+
+  useEffect(() => {
+    void loadSnapshots();
+  }, [loadSnapshots]);
 
   useEffect(() => {
     setTags(mod.categories);
@@ -121,10 +154,55 @@ export default function ModDetailModal({
       return;
     }
     try {
-      const r = await api.overwriteLocalWithWorkshop(mod.id, cp?.id);
-      onToast('ok', '已用创意工坊版覆盖本地', r?.backup ? `备份：${r.backup}` : undefined);
+      await api.overwriteLocalWithWorkshop(mod.id, cp?.id);
+      await loadSnapshots();
+      onToast('ok', '已用创意工坊版覆盖本地', '覆盖前的本地版本已存成快照，可在「历史版本」里回滚');
     } catch (e: any) {
       onToast('err', '覆盖失败', String(e?.message || e));
+    }
+  }
+
+  async function createSnap() {
+    setSnapBusy(true);
+    try {
+      await api.createSnapshot(mod.id);
+      await loadSnapshots();
+      onToast('ok', '已创建快照', '之后改坏了可以回滚到这一刻');
+    } catch (e: any) {
+      onToast('err', '创建快照失败', String(e?.message || e));
+    } finally {
+      setSnapBusy(false);
+    }
+  }
+
+  async function doRestore(id: string) {
+    setSnapBusy(true);
+    try {
+      const r = await api.restoreSnapshot(mod.id, id);
+      await loadSnapshots();
+      setPendingRestore(null);
+      onToast(
+        'ok',
+        '已回滚到该版本',
+        r?.undoId ? '回滚前的状态也存成快照了，可以再回滚回去' : undefined
+      );
+    } catch (e: any) {
+      onToast('err', '回滚失败', String(e?.message || e));
+    } finally {
+      setSnapBusy(false);
+    }
+  }
+
+  async function doDeleteSnap(id: string) {
+    setSnapBusy(true);
+    try {
+      await api.deleteSnapshot(mod.id, id);
+      await loadSnapshots();
+      onToast('ok', '已删除快照');
+    } catch (e: any) {
+      onToast('err', '删除快照失败', String(e?.message || e));
+    } finally {
+      setSnapBusy(false);
     }
   }
 
@@ -269,6 +347,87 @@ export default function ModDetailModal({
                 取消
               </button>
             </div>
+          )}
+
+          {isLocal && (
+            <>
+              <div className="section-title">
+                历史版本{snapshots.length ? `（${snapshots.length}）` : ''}
+              </div>
+
+              <div className="btn-row" style={{ marginBottom: snapshots.length ? 10 : 8 }}>
+                <button className="btn sm" onClick={createSnap} disabled={snapBusy}>
+                  <IconPlus size={13} />
+                  创建快照
+                </button>
+                <span className="bk-dim" style={{ alignSelf: 'center' }}>
+                  覆盖工坊版 / 再次备份工坊 mod 时也会自动留快照
+                </span>
+              </div>
+
+              {snapshots.length === 0 ? (
+                <div className="hint" style={{ marginBottom: 0 }}>
+                  还没有快照。点「创建快照」把当前状态存下来，之后改坏了可以一键回滚。
+                </div>
+              ) : (
+                <div className="snap-list">
+                  {snapshots.map((s) => (
+                    <div key={s.id} className="snap-row">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="snap-time">{fmtDateTime(s.at)}</div>
+                        <div className="snap-meta">
+                          {s.label && <span className="badge ver">{s.label}</span>}
+                          {humanSize(s.bytes)} · {s.files} 个文件
+                        </div>
+                      </div>
+                      {pendingRestore === s.id ? (
+                        <>
+                          <button
+                            className="btn sm danger"
+                            onClick={() => void doRestore(s.id)}
+                            disabled={snapBusy}
+                          >
+                            确认回滚
+                          </button>
+                          <button className="btn sm" onClick={() => setPendingRestore(null)}>
+                            取消
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn sm"
+                            onClick={() => setPendingRestore(s.id)}
+                            disabled={snapBusy}
+                          >
+                            <IconRefresh size={13} />
+                            回滚
+                          </button>
+                          <button
+                            className="btn icon sm"
+                            title="删除这个快照"
+                            onClick={() => void doDeleteSnap(s.id)}
+                            disabled={snapBusy}
+                          >
+                            <IconTrash size={13} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {pendingRestore && (
+                <div className="warn-bar" style={{ marginTop: 10, marginBottom: 0 }}>
+                  <IconAlert size={16} />
+                  <div>
+                    回滚会把这个 mod 的文件夹替换成所选快照的内容。当前状态会先自动存成一份新快照，
+                    所以<b>回滚本身也能撤销</b>。
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           <div className="section-title">

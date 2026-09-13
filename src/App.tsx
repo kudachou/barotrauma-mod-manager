@@ -17,8 +17,9 @@ import CollectionsView from './components/CollectionsView';
 import SettingsView from './components/SettingsView';
 import ModDetailModal from './components/ModDetailModal';
 import UpdateBanner from './components/UpdateBanner';
+import BackupModal from './components/BackupModal';
 import Toasts, { type ToastItem } from './components/Toasts';
-import { IconAlert, IconRefresh } from './components/Icons';
+import { IconAlert, IconDownload, IconPlay, IconRefresh } from './components/Icons';
 
 const TITLES: Record<ViewKey, { title: string; sub: string }> = {
   library: { title: 'Mod 库', sub: '浏览本地与创意工坊 mod，查看版本对比与分类' },
@@ -34,6 +35,7 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
   const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [backupOpen, setBackupOpen] = useState(false);
   /** 用户点了「稍后」的版本号，同一个版本不再弹 */
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const toastSeq = useRef(0);
@@ -114,6 +116,15 @@ export default function App() {
       await api.updaterInstall();
     } catch (e: any) {
       pushToast('err', '启动安装失败', String(e?.message || e));
+    }
+  }, [pushToast]);
+
+  const launchGame = useCallback(async () => {
+    try {
+      const r = await api.launchGame();
+      pushToast('ok', '正在启动游戏', r && r.via === 'steam' ? '找不到游戏 exe，已交给 Steam 启动' : undefined);
+    } catch (e: any) {
+      pushToast('err', '启动游戏失败', String(e?.message || e));
     }
   }, [pushToast]);
 
@@ -294,9 +305,21 @@ export default function App() {
             <div className="page-sub">{TITLES[view].sub}</div>
           </div>
           <span className="spacer" />
+          <button
+            className="btn"
+            onClick={() => setBackupOpen(true)}
+            title="把所有创意工坊 mod 复制一份到 LocalMods"
+          >
+            <IconDownload size={15} />
+            备份工坊 mod
+          </button>
           <button className="btn" onClick={refresh} disabled={loading}>
             <IconRefresh size={15} />
             {loading ? '读取中…' : '重新扫描'}
+          </button>
+          <button className="btn primary" onClick={launchGame} title="启动潜渊症">
+            <IconPlay size={15} />
+            启动游戏
           </button>
         </div>
 
@@ -365,6 +388,14 @@ export default function App() {
           onClose={() => setSelected(null)}
           onToast={pushToast}
           onModUpdate={updateMod}
+        />
+      )}
+
+      {backupOpen && (
+        <BackupModal
+          onClose={() => setBackupOpen(false)}
+          onToast={pushToast}
+          onDone={refresh}
         />
       )}
 

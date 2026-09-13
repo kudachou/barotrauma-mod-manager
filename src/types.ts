@@ -114,3 +114,58 @@ export interface UpdateState {
   error: string | null;
   checkedAt: number | null;
 }
+
+/** 本地 mod 的一份历史快照 */
+export interface Snapshot {
+  id: string;
+  at: number;
+  bytes: number;
+  files: number;
+  label: string | null;
+}
+
+export interface SnapshotList {
+  items: Snapshot[];
+  summary: { count: number; bytes: number; latestAt: number | null };
+}
+
+export interface BackupPlanItem {
+  id: string;
+  name: string;
+  folder: string;
+  source: string;
+  bytes: number;
+  files: number;
+  /** 已有本地副本 → 会先留快照再更新 */
+  existing: boolean;
+}
+
+export interface BackupPlan {
+  items: BackupPlanItem[];
+  skipped: { id: string; name: string; reason: string }[];
+  totalBytes: number;
+  totalFiles: number;
+  updateCount: number;
+  newCount: number;
+}
+
+export interface BackupProgress {
+  phase: 'planning' | 'copying' | 'done';
+  done: number;
+  total: number;
+  bytesDone?: number;
+  bytesTotal?: number;
+  current?: string | null;
+  snapshotted?: number;
+  errors?: number;
+}
+
+export interface BackupResult {
+  done: number;
+  total: number;
+  bytesDone: number;
+  snapshotted: number;
+  errors: { name: string; id: string; message: string }[];
+  folders: string[];
+  skipped: { id: string; name: string; reason: string }[];
+}

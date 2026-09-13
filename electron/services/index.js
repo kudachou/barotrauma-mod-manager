@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { ipcMain, dialog, shell, app } = require('electron');
 
 const { getSettings, saveSettings, backupDir, userDataDir, redetect } = require('./settings');
@@ -21,6 +22,16 @@ const {
 } = require('./modlists');
 const { applyToGame, stamp } = require('./config');
 const { registerUpdaterIpc } = require('./updater');
+const { copyDir } = require('./fsutil');
+const {
+  listSnapshots,
+  snapshotSummary,
+  createSnapshot,
+  restoreSnapshot,
+  deleteSnapshot,
+  planWorkshopBackup,
+  runWorkshopBackup
+} = require('./backup');
 const {
   fetchDetails,
   downloadPreview,
@@ -60,21 +71,7 @@ function findCover(key) {
   return null;
 }
 
-function copyDir(src, dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
-    const from = path.join(src, e.name);
-    const to = path.join(dest, e.name);
-    if (e.isDirectory()) copyDir(from, to);
-    else if (e.isSymbolicLink()) {
-      try {
-        fs.symlinkSync(fs.readlinkSync(from), to);
-      } catch {
-        /* 忽略单个链接失败 */
-      }
-    } else fs.copyFileSync(from, to);
-  }
-}
+/* copyDir / dirStats 等文件工具在 fsutil.js */
 
 /** 读一次合集目录：同时得到摘要列表和「mod → 所属合集」映射 */
 function readAllModlists(dir) {
@@ -328,7 +325,7 @@ function registerIpc() {
     return { local, workshop: local.counterpart };
   });
 
-  /** 用创意工坊版覆盖本地版：先把本地文件夹在同盘改名成备份（瞬时），再复制工坊版进来 */
+  /** 用创意工坊版覆盖本地版：先把本地状态存成快照（可回滚），再复制工坊版进来 */
   ipcMain.handle('compare:overwrite', (_e, localId, workshopId) => {
     const s = getSettings();
     const localDir = path.join(s.localModsDir, localId);
@@ -336,27 +333,20 @@ function registerIpc() {
     if (!fs.existsSync(localDir)) throw new Error(`本地 mod 文件夹不存在：${localDir}`);
     if (!fs.existsSync(srcDir)) throw new Error(`创意工坊 mod 文件夹不存在：${srcDir}`);
 
-    const root = backupDir(s);
-    fs.mkdirSync(root, { recursive: true });
-    const bakPath = path.join(root, `${path.basename(localId)}.bak-${stamp()}`);
-
-    fs.renameSync(localDir, bakPath);
+    const snap = createSnapshot(s, localId, { label: '覆盖前的本地版本' });
     try {
+      fs.rmSync(localDir, { recursive: true, force: true });
       copyDir(srcDir, localDir);
     } catch (e) {
+      // 失败就用刚存的快照还原回去，别把用户的本地版弄丢
       try {
-        fs.rmSync(localDir, { recursive: true, force: true });
-      } catch {
-        /* 忽略 */
-      }
-      try {
-        fs.renameSync(bakPath, localDir);
+        restoreSnapshot(s, localId, snap.id, { keepCurrent: false });
       } catch {
         /* 忽略 */
       }
       throw e;
     }
-    return { ok: true, backup: bakPath };
+    return { ok: true, snapshotId: snap.id };
   });
 
   /** 把创意工坊 mod 复制成新的本地 mod */
@@ -388,6 +378,82 @@ function registerIpc() {
   /* -------------------------------- 更新 -------------------------------- */
 
   registerUpdaterIpc(ipcMain);
+
+  /* ------------------------------- 启动游戏 ------------------------------- */
+
+  ipcMain.handle('game:launch', async () => {
+    const s = getSettings();
+    if (!s.gameDir) throw new Error('还没设置游戏根目录，请先到「设置」里指定');
+
+    const exe = path.join(s.gameDir, 'Barotrauma.exe');
+    if (fs.existsSync(exe)) {
+      const child = spawn(exe, [], { detached: true, stdio: 'ignore', cwd: s.gameDir });
+      child.unref();
+      return { ok: true, via: 'exe' };
+    }
+    // 找不到 exe 就交给 Steam 启动（潜渊症 AppID = 602960）
+    await shell.openExternal('steam://rungameid/602960');
+    return { ok: true, via: 'steam' };
+  });
+
+  /* ------------------------------- 快照 ------------------------------- */
+
+  ipcMain.handle('snapshot:list', (_e, modName) => {
+    const s = getSettings();
+    return { items: listSnapshots(s, modName), summary: snapshotSummary(s, modName) };
+  });
+
+  ipcMain.handle('snapshot:create', (_e, modName) => {
+    const s = getSettings();
+    return createSnapshot(s, modName, { label: '手动创建' });
+  });
+
+  ipcMain.handle('snapshot:restore', (_e, modName, id) => {
+    const s = getSettings();
+    return restoreSnapshot(s, modName, id);
+  });
+
+  ipcMain.handle('snapshot:delete', (_e, modName, id) => {
+    const s = getSettings();
+    return deleteSnapshot(s, modName, id);
+  });
+
+  /* --------------------------- 工坊 mod 一键备份 --------------------------- */
+
+  let backupRunning = false;
+  let backupCancelled = false;
+
+  const measure = (sender) =>
+    planWorkshopBackup(getSettings(), {
+      onStep: (done, total, current) =>
+        send(sender, 'backup:progress', { phase: 'planning', done, total, current })
+    });
+
+  /** 只算不复制：给出数量与总体积，让用户决定要不要执行 */
+  ipcMain.handle('backup:plan', (event) => measure(event.sender));
+
+  ipcMain.handle('backup:start', (event) => {
+    if (backupRunning) throw new Error('已有备份任务在进行中');
+    const s = getSettings();
+    const sender = event.sender;
+
+    backupRunning = true;
+    backupCancelled = false;
+    try {
+      const plan = measure(sender);
+      return runWorkshopBackup(s, plan, {
+        onProgress: (p) => send(sender, 'backup:progress', p),
+        isCancelled: () => backupCancelled
+      });
+    } finally {
+      backupRunning = false;
+    }
+  });
+
+  ipcMain.handle('backup:cancel', () => {
+    backupCancelled = true;
+    return true;
+  });
 
   /* -------------------------------- 杂项 -------------------------------- */
 

@@ -5,7 +5,12 @@ import type {
   ModlistFull,
   ModlistSummary,
   ScanResult,
-  UpdateState
+  UpdateState,
+  Snapshot,
+  SnapshotList,
+  BackupPlan,
+  BackupProgress,
+  BackupResult
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -144,6 +149,62 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   updaterDownload: async (): Promise<UpdateState> => mockUpdateState(),
   updaterInstall: async (): Promise<boolean> => false,
   onUpdaterEvent: (_cb: (s: UpdateState) => void): void => {},
+
+  // 预览模式下只是把示例数据装出来给界面看
+  launchGame: async (): Promise<{ ok: boolean; via: string }> => ({ ok: true, via: 'preview' }),
+
+  listSnapshots: async (_modName: string): Promise<SnapshotList> => ({
+    items: [],
+    summary: { count: 0, bytes: 0, latestAt: null }
+  }),
+  createSnapshot: async (_modName: string): Promise<Snapshot> => ({
+    id: 'preview',
+    at: Date.now(),
+    bytes: 0,
+    files: 0,
+    label: '预览模式'
+  }),
+  restoreSnapshot: async (
+    _modName: string,
+    _id: string
+  ): Promise<{ ok: boolean; undoId: string | null }> => ({ ok: true, undoId: null }),
+  deleteSnapshot: async (_modName: string, _id: string): Promise<{ ok: boolean }> => ({ ok: true }),
+
+  planWorkshopBackup: async (): Promise<BackupPlan> => {
+    const items = state.mods
+      .filter((m) => m.source === 'workshop')
+      .map((m, i) => ({
+        id: m.id,
+        name: m.name,
+        folder: m.name,
+        source: m.path,
+        bytes: 32 * 1024 * 1024 + i * 1_500_000,
+        files: 120 + i * 7,
+        existing: false
+      }));
+    return {
+      items,
+      skipped: [],
+      totalBytes: items.reduce((s, x) => s + x.bytes, 0),
+      totalFiles: items.reduce((s, x) => s + x.files, 0),
+      updateCount: 0,
+      newCount: items.length
+    };
+  },
+  startWorkshopBackup: async (): Promise<BackupResult> => {
+    const plan = await mockApi.planWorkshopBackup();
+    return {
+      done: plan.items.length,
+      total: plan.items.length,
+      bytesDone: plan.totalBytes,
+      snapshotted: 0,
+      errors: [],
+      folders: plan.items.map((x) => x.folder),
+      skipped: []
+    };
+  },
+  cancelWorkshopBackup: async (): Promise<boolean> => true,
+  onBackupProgress: (_cb: (p: BackupProgress) => void): void => {},
 
   setLocalCover: async (sourceId: string): Promise<string | null> => {
     return new Promise((resolve) => {

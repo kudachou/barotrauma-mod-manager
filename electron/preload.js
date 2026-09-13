@@ -43,6 +43,23 @@ contextBridge.exposeInMainWorld('api', {
   overwriteLocalWithWorkshop: (localId, workshopId) => invoke('compare:overwrite', localId, workshopId),
   copyWorkshopToLocal: (workshopId, newName) => invoke('compare:copyToLocal', workshopId, newName),
 
+  // 启动游戏
+  launchGame: () => invoke('game:launch'),
+
+  // 快照 / 回滚（本地 mod 的历史版本）
+  listSnapshots: (modName) => invoke('snapshot:list', modName),
+  createSnapshot: (modName) => invoke('snapshot:create', modName),
+  restoreSnapshot: (modName, id) => invoke('snapshot:restore', modName, id),
+  deleteSnapshot: (modName, id) => invoke('snapshot:delete', modName, id),
+
+  // 一键备份所有工坊 mod 到 LocalMods
+  planWorkshopBackup: () => invoke('backup:plan'),
+  startWorkshopBackup: () => invoke('backup:start'),
+  cancelWorkshopBackup: () => invoke('backup:cancel'),
+  onBackupProgress: (cb) => {
+    ipcRenderer.on('backup:progress', (_e, progress) => cb(progress));
+  },
+
   // 更新
   updaterStatus: () => invoke('updater:status'),
   updaterCheck: () => invoke('updater:check'),
