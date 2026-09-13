@@ -290,7 +290,7 @@ try {
 
   /* ------------------ 7. 快照 / 回滚 / 工坊备份（合成样本） ------------------ */
 
-  console.log('\n[7] 快照与回滚');
+  console.log('\n[7] 快照与回滚（每个 mod 只留 1 份）');
 
   const bk = require('../electron/services/backup');
   const bkRoot = path.join(TMP, 'bk');
@@ -302,45 +302,51 @@ try {
   };
 
   const localMod = path.join(bkSettings.localModsDir, '我的mod');
+  const writeData = (v) => fs.writeFileSync(path.join(localMod, 'data.txt'), v, 'utf8');
+  const readData = () => fs.readFileSync(path.join(localMod, 'data.txt'), 'utf8');
+
   fs.mkdirSync(localMod, { recursive: true });
   fs.writeFileSync(
     path.join(localMod, 'filelist.xml'),
     '<contentpackage name="我的mod" modversion="1.0" steamworkshopid="111" />',
     'utf8'
   );
-  fs.writeFileSync(path.join(localMod, 'data.txt'), '第一版', 'utf8');
+  writeData('第一版');
 
+  ok(bk.MAX_SNAPSHOTS === 1, `默认每个 mod 只保留 ${bk.MAX_SNAPSHOTS} 份快照`);
   ok(bk.snapshotRoot(bkSettings) === path.join(bkRoot, 'ModManagerBackups'), '快照根目录在 LocalMods 同级');
   ok(bk.listSnapshots(bkSettings, '我的mod').length === 0, '初始没有快照');
 
-  const snap1 = bk.createSnapshot(bkSettings, '我的mod', { label: '第一版' });
+  // 真实用法：快照存的是「改动前」的样子
+  const snap1 = bk.createSnapshot(bkSettings, '我的mod', { label: '改动前' });
   ok(!!snap1.id && snap1.files === 2, `创建快照成功（${snap1.files} 个文件）`);
-  ok(bk.listSnapshots(bkSettings, '我的mod')[0].label === '第一版', '快照备注被保存');
+  ok(bk.listSnapshots(bkSettings, '我的mod').length === 1, '创建后是 1 份');
 
-  fs.writeFileSync(path.join(localMod, 'data.txt'), '第二版', 'utf8');
-  const snap2 = bk.createSnapshot(bkSettings, '我的mod', { label: '第二版' });
+  writeData('第二版');
+  const snap2 = bk.createSnapshot(bkSettings, '我的mod', { label: '第二版改动前' });
   ok(snap2.id !== snap1.id, '同一秒内连续创建也不会撞 id');
 
   const list = bk.listSnapshots(bkSettings, '我的mod');
-  ok(list.length === 2, `快照列表有 ${list.length} 条且按时间倒序`);
+  ok(list.length === 1, `再创建后仍然只有 ${list.length} 份（旧的自动清掉，省空间）`);
+  ok(list[0].id === snap2.id, '留下的是最新的那份');
+  ok(list[0].label === '第二版改动前', '备注跟着最新那份');
 
-  const snapCountBefore = bk.listSnapshots(bkSettings, '我的mod').length;
-  const restored = bk.restoreSnapshot(bkSettings, '我的mod', snap1.id);
-  ok(
-    fs.readFileSync(path.join(localMod, 'data.txt'), 'utf8') === '第一版',
-    '回滚后内容恢复成快照 1 的状态'
-  );
-  ok(!!restored.undoId, '回滚会返回一个「回滚前」快照 id（可撤销）');
-  ok(
-    bk.listSnapshots(bkSettings, '我的mod').length === snapCountBefore + 1,
-    '回滚前自动多存了一份快照，所以回滚本身也能撤销'
-  );
-
+  // 场景：快照=第一版，本地已被改成第二版 → 回滚应回到第一版
   bk.deleteSnapshot(bkSettings, '我的mod', snap2.id);
-  ok(
-    bk.listSnapshots(bkSettings, '我的mod').every((s) => s.id !== snap2.id),
-    '删除快照生效'
-  );
+  const fresh = bk.createSnapshot(bkSettings, '我的mod', { label: '第二版' }); // 快照=第二版
+  writeData('第三版'); // 本地被改坏
+  const restored = bk.restoreSnapshot(bkSettings, '我的mod', fresh.id);
+  ok(readData() === '第二版', '回滚后内容回到快照时的状态（第二版）');
+  ok(!!restored.undoId, '回滚会返回一个「回滚前」快照 id');
+
+  const afterList = bk.listSnapshots(bkSettings, '我的mod');
+  ok(afterList.length === 1, '回滚后仍然只有 1 份快照（回滚前那份顶替上来）');
+  ok(afterList[0].id === restored.undoId, '这份就是「回滚前」的状态');
+
+  const rollBack = bk.restoreSnapshot(bkSettings, '我的mod', restored.undoId);
+  ok(readData() === '第三版', '再回滚一次就回到第三版 —— 回滚本身可撤销');
+  ok(!!rollBack.undoId, '第二次回滚同样可撤销');
+  ok(bk.listSnapshots(bkSettings, '我的mod').length === 1, '无论滚多少次，始终只占 1 份快照');
 
   let guard = false;
   try {
@@ -349,6 +355,41 @@ try {
     guard = true;
   }
   ok(guard, '给不存在的本地 mod 打快照会报错');
+
+  console.log('\n[7b] 本地 mod 占用统计与一键删除');
+
+  const fp = bk.localModFootprint(bkSettings, '我的mod');
+  ok(fp.exists && fp.modBytes > 0, `算得出 mod 本体占用（${fp.modBytes} B）`);
+  ok(fp.snapshotCount === 1 && fp.snapshotBytes > 0, `算得出快照占用（${fp.snapshotBytes} B）`);
+  ok(fp.totalBytes === fp.modBytes + fp.snapshotBytes, '总体积 = 本体 + 快照');
+
+  const del = bk.deleteLocalModFiles(bkSettings, '我的mod');
+  ok(!fs.existsSync(localMod), 'mod 文件夹已删除');
+  ok(
+    !fs.existsSync(path.join(bk.snapshotRoot(bkSettings), '我的mod')),
+    '它的历史快照目录也一并删除'
+  );
+  ok(
+    del.freedBytes === fp.totalBytes && del.snapshotCount === 1,
+    `返回释放信息（${del.freedBytes} B / ${del.snapshotCount} 份快照）`
+  );
+
+  let pathGuard = false;
+  try {
+    bk.deleteLocalModFiles(bkSettings, '..\\..\\config_player.xml');
+  } catch {
+    pathGuard = true;
+  }
+  ok(pathGuard, '拒绝删除 LocalMods 之外的路径');
+
+  // 给下一节留一个本地 mod（用来验证「更新已有副本前留快照」）
+  fs.mkdirSync(localMod, { recursive: true });
+  fs.writeFileSync(
+    path.join(localMod, 'filelist.xml'),
+    '<contentpackage name="我的mod" modversion="1.0" steamworkshopid="111" />',
+    'utf8'
+  );
+  writeData('第一版');
 
   console.log('\n[8] 一键备份工坊 mod 到本地');
 

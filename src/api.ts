@@ -10,7 +10,9 @@ import type {
   SnapshotList,
   BackupPlan,
   BackupProgress,
-  BackupResult
+  BackupResult,
+  LocalModFootprint,
+  DeleteLocalModResult
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -169,6 +171,31 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
     _id: string
   ): Promise<{ ok: boolean; undoId: string | null }> => ({ ok: true, undoId: null }),
   deleteSnapshot: async (_modName: string, _id: string): Promise<{ ok: boolean }> => ({ ok: true }),
+
+  localModFootprint: async (_modName: string): Promise<LocalModFootprint> => ({
+    exists: true,
+    modBytes: 0,
+    snapshotCount: 0,
+    snapshotBytes: 0,
+    totalBytes: 0
+  }),
+  deleteLocalMod: async (
+    modName: string,
+    removeFromModlists: boolean
+  ): Promise<DeleteLocalModResult> => {
+    const idx = state.mods.findIndex((m) => m.source === 'local' && m.id === modName);
+    if (idx >= 0) state.mods.splice(idx, 1);
+    const removedFromModlists: string[] = [];
+    if (removeFromModlists) {
+      for (const l of state.modlists) {
+        const before = l.entries.length;
+        l.entries = l.entries.filter((e) => !(e.type === 'local' && e.name === modName));
+        if (l.entries.length !== before) removedFromModlists.push(l.name);
+      }
+    }
+    refreshUsedIn();
+    return { freedBytes: 0, snapshotCount: 0, removedFromModlists };
+  },
 
   planWorkshopBackup: async (): Promise<BackupPlan> => {
     const items = state.mods

@@ -44,6 +44,17 @@ function writeLabels(dir, labels) {
   }
 }
 
+/**
+ * 每个本地 mod 只保留这么多个快照。
+ * 1 = 只留最近一份「改动前的状态」，既够回滚又不占地方。
+ * 想多留几份历史就把这个数字改大即可（界面会自动多列几条）。
+ */
+const MAX_SNAPSHOTS = 1;
+
+function isSnapshotDir(name) {
+  return !name.startsWith('.') && !!parseStamp(name);
+}
+
 /** 列出某个本地 mod 的所有快照（新的在前） */
 function listSnapshots(settings, modName) {
   const dir = modSnapshotDir(settings, modName);
@@ -52,7 +63,7 @@ function listSnapshots(settings, modName) {
   const labels = readLabels(dir);
   const out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (!e.isDirectory()) continue;
+    if (!e.isDirectory() || !isSnapshotDir(e.name)) continue;
     const p = path.join(dir, e.name);
     const { bytes, files } = dirStats(p);
     out.push({
@@ -67,6 +78,23 @@ function listSnapshots(settings, modName) {
   return out;
 }
 
+/** 只保留最新的 keep 份，其余删掉；返回删掉的份数 */
+function pruneSnapshots(settings, modName, keep = MAX_SNAPSHOTS) {
+  const list = listSnapshots(settings, modName);
+  if (list.length <= keep) return 0;
+
+  const dir = modSnapshotDir(settings, modName);
+  const labels = readLabels(dir);
+  let removed = 0;
+  for (const snap of list.slice(keep)) {
+    rmrf(path.join(dir, snap.id));
+    delete labels[snap.id];
+    removed++;
+  }
+  writeLabels(dir, labels);
+  return removed;
+}
+
 function snapshotSummary(settings, modName) {
   const list = listSnapshots(settings, modName);
   return {
@@ -76,7 +104,7 @@ function snapshotSummary(settings, modName) {
   };
 }
 
-/** 给本地 mod 的当前状态打一个快照 */
+/** 给本地 mod 的当前状态打一个快照（只保留最新 MAX_SNAPSHOTS 份） */
 function createSnapshot(settings, modName, opts = {}) {
   const src = path.join(settings.localModsDir, modName);
   if (!fs.existsSync(src)) throw new Error(`本地 mod 文件夹不存在：${src}`);
@@ -97,23 +125,54 @@ function createSnapshot(settings, modName, opts = {}) {
     writeLabels(root, labels);
   }
 
+  // 先建好新的再删旧的：万一中途失败，至少还留着一份能回滚
+  pruneSnapshots(settings, modName, opts.keep == null ? MAX_SNAPSHOTS : opts.keep);
+
   const { bytes, files } = dirStats(dest);
   return { id, at: parseStamp(id) || Date.now(), bytes, files, label: opts.label || null };
 }
 
-/** 回滚到某个快照。keepCurrent 为 true（默认）时先把当前状态也存一份，所以回滚本身也能撤销 */
+/**
+ * 回滚到某个快照。
+ *
+ * 因为只留 1 份，回滚时要做个「换位」：先把当前状态挪到临时目录，用快照覆盖本地文件夹，
+ * 再把临时目录变成唯一的那份快照 —— 这样滚完之后还能滚回来（回滚本身可撤销）。
+ */
 function restoreSnapshot(settings, modName, id, opts = {}) {
   const keepCurrent = opts.keepCurrent !== false;
-  const snap = path.join(modSnapshotDir(settings, modName), String(id));
-  if (!fs.existsSync(snap)) throw new Error('快照不存在或已被删除');
+  const dir = modSnapshotDir(settings, modName);
+  const snapPath = path.join(dir, String(id));
+  if (!fs.existsSync(snapPath)) throw new Error('快照不存在或已被删除');
 
   const dest = path.join(settings.localModsDir, modName);
-  let undoId = null;
+
+  const tmp = path.join(dir, `.tmp-${stamp()}-${Math.random().toString(36).slice(2, 6)}`);
+  let hasCurrent = false;
   if (keepCurrent && fs.existsSync(dest)) {
-    undoId = createSnapshot(settings, modName, { label: '回滚前自动保存' }).id;
+    fs.mkdirSync(dir, { recursive: true });
+    copyDir(dest, tmp);
+    hasCurrent = true;
   }
+
   rmrf(dest);
-  copyDir(snap, dest);
+  copyDir(snapPath, dest);
+
+  let undoId = null;
+  if (hasCurrent) {
+    // 清掉所有旧快照（含刚用掉的那份），把临时目录顶上来当唯一快照
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory() && e.name !== path.basename(tmp)) rmrf(path.join(dir, e.name));
+    }
+    writeLabels(dir, {});
+    undoId = stamp();
+    if (fs.existsSync(path.join(dir, undoId))) undoId = `${undoId}-u`;
+    fs.renameSync(tmp, path.join(dir, undoId));
+    writeLabels(dir, { [undoId]: '回滚前自动保存' });
+  } else {
+    // 没有可保留的当前状态，就把用掉的快照删掉，避免留下过期内容
+    rmrf(snapPath);
+  }
+
   return { ok: true, undoId };
 }
 
@@ -126,6 +185,35 @@ function deleteSnapshot(settings, modName, id) {
   delete labels[id];
   writeLabels(dir, labels);
   return { ok: true };
+}
+
+/** 某个本地 mod 占用的空间（mod 本体 + 它的所有快照） */
+function localModFootprint(settings, modName) {
+  const folder = path.join(settings.localModsDir, modName);
+  const modBytes = fs.existsSync(folder) ? dirStats(folder).bytes : 0;
+  const snapshots = listSnapshots(settings, modName);
+  const snapshotBytes = snapshots.reduce((s, x) => s + x.bytes, 0);
+  return {
+    exists: fs.existsSync(folder),
+    modBytes,
+    snapshotCount: snapshots.length,
+    snapshotBytes,
+    totalBytes: modBytes + snapshotBytes
+  };
+}
+
+/** 删除一个本地 mod：mod 文件夹 + 它的全部历史快照 */
+function deleteLocalModFiles(settings, modName) {
+  const localRoot = path.resolve(settings.localModsDir || '.');
+  const folder = path.resolve(localRoot, modName);
+  // 只允许删 LocalMods 里的东西，防止名字里带 .. 之类的东西跑到外面去
+  if (folder === localRoot || !folder.startsWith(localRoot + path.sep)) {
+    throw new Error('非法的 mod 名称');
+  }
+  const before = localModFootprint(settings, modName);
+  rmrf(folder);
+  rmrf(modSnapshotDir(settings, modName));
+  return { freedBytes: before.totalBytes, snapshotCount: before.snapshotCount, files: before };
 }
 
 /* --------------------------- 工坊 mod 备份 --------------------------- */
@@ -287,12 +375,16 @@ function runWorkshopBackup(settings, plan, hooks = {}) {
 
 module.exports = {
   SNAPSHOT_ROOT_NAME,
+  MAX_SNAPSHOTS,
   snapshotRoot,
   listSnapshots,
   snapshotSummary,
+  pruneSnapshots,
   createSnapshot,
   restoreSnapshot,
   deleteSnapshot,
+  localModFootprint,
+  deleteLocalModFiles,
   planWorkshopBackup,
   runWorkshopBackup
 };

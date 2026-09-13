@@ -80,9 +80,13 @@ function stamp(d) {
   );
 }
 
-/** 把 YYYYMMDD-HHMMSS 解析回毫秒 */
+/**
+ * 把 YYYYMMDD-HHMMSS 解析回毫秒。
+ * 刻意不加 $ 锚定：同一秒内创建的快照会带上随机后缀（如 20260913-193000-ab12），
+ * 加了锚定的话这些快照会被当成"不是快照"而被列表忽略 —— 磁盘上有、界面上看不到。
+ */
 function parseStamp(id) {
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(String(id || ''));
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(String(id || ''));
   if (!m) return null;
   const [, y, mo, d, h, mi, s] = m.map(Number);
   return new Date(y, mo - 1, d, h, mi, s).getTime();

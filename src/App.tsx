@@ -128,6 +128,11 @@ export default function App() {
     }
   }, [pushToast]);
 
+  const handleLocalModDeleted = useCallback(() => {
+    setSelected(null);
+    void refresh();
+  }, [refresh]);
+
   const mods = data?.mods || [];
   const modlists = data?.modlists || [];
   const categories = data?.categories || { mods: {}, custom: [], removed: [] };
@@ -385,6 +390,7 @@ export default function App() {
           onCreateModlistWith={createModlistWith}
           onCreateTag={addCustomTag}
           onDeleteTag={deleteTag}
+          onLocalModDeleted={handleLocalModDeleted}
           onClose={() => setSelected(null)}
           onToast={pushToast}
           onModUpdate={updateMod}

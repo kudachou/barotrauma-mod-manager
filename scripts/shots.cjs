@@ -211,6 +211,37 @@ app.whenReady().then(async () => {
   );
   await shot(win, '04-detail');
 
+  // 验证「删除本地 mod」确认条
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot .btn')).find((x) =>
+      x.textContent.includes('删除本地 mod')
+    );
+    if (b) b.click();
+    return !!b;
+  })()`);
+  await sleep(500);
+  console.log(
+    'delete-local-confirm=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const bar = document.querySelector('.danger-bar');
+          return {
+            shown: !!bar,
+            text: bar ? bar.textContent.replace(/\\s+/g, ' ').trim().slice(0, 90) : null,
+            hasCheckbox: !!document.querySelector('.cb-row input')
+          };
+        })()`)
+      )
+  );
+  await shot(win, '15-delete-local');
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.danger-bar .btn')).find(
+      (x) => x.textContent.trim() === '取消'
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(300);
+
   // 验证「加入合集」：点一个合集 chip，应出现提示
   const chip = await win.webContents.executeJavaScript(`(() => {
     const c = document.querySelector('.list-toggle');

@@ -29,6 +29,8 @@ const {
   createSnapshot,
   restoreSnapshot,
   deleteSnapshot,
+  localModFootprint,
+  deleteLocalModFiles,
   planWorkshopBackup,
   runWorkshopBackup
 } = require('./backup');
@@ -416,6 +418,37 @@ function registerIpc() {
   ipcMain.handle('snapshot:delete', (_e, modName, id) => {
     const s = getSettings();
     return deleteSnapshot(s, modName, id);
+  });
+
+  /* ---------------------------- 删除本地 mod ---------------------------- */
+
+  ipcMain.handle('localmod:footprint', (_e, modName) =>
+    localModFootprint(getSettings(), String(modName || ''))
+  );
+
+  /** 一键删除本地 mod：mod 文件夹 + 它的历史快照（可选同时从合集里摘掉引用） */
+  ipcMain.handle('localmod:delete', (_e, modName, removeFromModlists) => {
+    const s = getSettings();
+    const name = String(modName || '');
+    if (!name) throw new Error('缺少 mod 名称');
+
+    const removedFromModlists = [];
+    if (removeFromModlists) {
+      const { summaries } = readAllModlists(s.modListsDir);
+      for (const sum of summaries) {
+        try {
+          const full = getModlist(s.modListsDir, sum.fileName);
+          if (!full || !full.entries.some((e) => e.type === 'local' && e.name === name)) continue;
+          removeModFromModlist(s.modListsDir, sum.fileName, { type: 'local', name });
+          removedFromModlists.push(sum.name);
+        } catch {
+          /* 单个合集出错不影响其它的 */
+        }
+      }
+    }
+
+    const r = deleteLocalModFiles(s, name);
+    return { ...r, removedFromModlists };
   });
 
   /* --------------------------- 工坊 mod 一键备份 --------------------------- */

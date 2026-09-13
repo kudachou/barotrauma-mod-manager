@@ -1263,7 +1263,6 @@ select.input option {
 }
 
 /* ============================ 更新提示条 ============================ */
-
 .update-bar {
   display: flex;
   align-items: flex-start;
@@ -1428,8 +1427,7 @@ select.input option {
 
 /* 快照列表 */
 
-.snap-list {
-  display: flex;
+.snap-list {  display: flex;
   flex-direction: column;
   gap: 6px;
   max-height: 250px;
@@ -1501,4 +1499,37 @@ select.input option {
   to {
     background-position: -200% 0;
   }
+}
+
+/* ============================ 危险操作条 ============================ */
+
+.danger-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px 14px;
+  margin-top: 10px;
+  border-radius: 11px;
+  background: rgba(251, 113, 133, 0.1);
+  border: 1px solid rgba(251, 113, 133, 0.32);
+  color: #fda4af;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.cb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 8px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-2);
+}
+
+.cb-row input {
+  margin-top: 2px;
+  accent-color: var(--danger);
+  cursor: pointer;
+  flex: none;
 }

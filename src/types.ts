@@ -129,6 +129,21 @@ export interface SnapshotList {
   summary: { count: number; bytes: number; latestAt: number | null };
 }
 
+/** 某个本地 mod 占用的空间（本体 + 历史快照） */
+export interface LocalModFootprint {
+  exists: boolean;
+  modBytes: number;
+  snapshotCount: number;
+  snapshotBytes: number;
+  totalBytes: number;
+}
+
+export interface DeleteLocalModResult {
+  freedBytes: number;
+  snapshotCount: number;
+  removedFromModlists: string[];
+}
+
 export interface BackupPlanItem {
   id: string;
   name: string;

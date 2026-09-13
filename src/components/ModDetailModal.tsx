@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ModInfo, ModlistSummary, Snapshot } from '../types';
+import type { LocalModFootprint, ModInfo, ModlistSummary, Snapshot } from '../types';
 import { api, imgSrc, placeholderHue } from '../api';
 import { categoryStyle } from '../categories';
 import { compareBadge, fmtDate, initials, modKey, uniq } from '../ui';
@@ -35,7 +35,8 @@ export default function ModDetailModal({
   onSetModlistMembership,
   onCreateModlistWith,
   onCreateTag,
-  onDeleteTag
+  onDeleteTag,
+  onLocalModDeleted
 }: {
   mod: ModInfo;
   allCategories: string[];
@@ -51,6 +52,8 @@ export default function ModDetailModal({
   onCreateModlistWith: (m: ModInfo, name: string) => Promise<void>;
   onCreateTag: (name: string) => Promise<void>;
   onDeleteTag: (name: string) => Promise<void>;
+  /** 删除本地 mod 成功后调用：关闭弹窗并刷新列表 */
+  onLocalModDeleted: () => void;
 }) {
   const [tags, setTags] = useState<string[]>(mod.categories);
   const [preview, setPreview] = useState<string | null>(mod.preview);
@@ -65,6 +68,10 @@ export default function ModDetailModal({
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [snapBusy, setSnapBusy] = useState(false);
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
+  const [confirmDeleteLocal, setConfirmDeleteLocal] = useState(false);
+  const [footprint, setFootprint] = useState<LocalModFootprint | null>(null);
+  const [removeFromLists, setRemoveFromLists] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   const isLocal = mod.source === 'local';
 
@@ -203,6 +210,35 @@ export default function ModDetailModal({
       onToast('err', '删除快照失败', String(e?.message || e));
     } finally {
       setSnapBusy(false);
+    }
+  }
+
+  async function openDeleteLocal() {
+    setConfirmDeleteLocal(true);
+    setRemoveFromLists(mod.usedIn.length > 0);
+    setFootprint(null);
+    try {
+      setFootprint(await api.localModFootprint(mod.id));
+    } catch {
+      /* 拿不到体积也不影响删除 */
+    }
+  }
+
+  async function doDeleteLocal() {
+    setDeleting(true);
+    try {
+      const r = await api.deleteLocalMod(mod.id, removeFromLists);
+      const parts = [
+        r.snapshotCount ? `含 ${r.snapshotCount} 份历史快照` : null,
+        r.removedFromModlists.length ? `已从 ${r.removedFromModlists.length} 个合集移除` : null,
+        r.freedBytes ? `释放 ${humanSize(r.freedBytes)}` : null
+      ].filter(Boolean) as string[];
+      onToast('ok', `已删除本地 mod「${mod.name}」`, parts.join(' · ') || undefined);
+      onLocalModDeleted();
+    } catch (e: any) {
+      onToast('err', '删除失败', String(e?.message || e));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -427,6 +463,46 @@ export default function ModDetailModal({
                   </div>
                 </div>
               )}
+
+              {confirmDeleteLocal && (
+                <div className="danger-bar">
+                  <IconAlert size={16} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div>
+                      确定删除本地 mod「{mod.name}」？<b>不可撤销。</b>
+                    </div>
+                    <div className="bk-dim" style={{ marginTop: 4 }}>
+                      会删除 mod 文件夹
+                      {footprint && footprint.snapshotCount > 0
+                        ? ` 和它的 ${footprint.snapshotCount} 份历史快照`
+                        : ''}
+                      {footprint && footprint.totalBytes > 0
+                        ? `（约释放 ${humanSize(footprint.totalBytes)}）`
+                        : ''}
+                    </div>
+                    {mod.usedIn.length > 0 && (
+                      <label className="cb-row">
+                        <input
+                          type="checkbox"
+                          checked={removeFromLists}
+                          onChange={(e) => setRemoveFromLists(e.target.checked)}
+                        />
+                        同时从 {mod.usedIn.length} 个合集里移除引用（{mod.usedIn.join('、')}）
+                      </label>
+                    )}
+                  </div>
+                  <button className="btn sm danger" onClick={doDeleteLocal} disabled={deleting}>
+                    {deleting ? '删除中…' : '确认删除'}
+                  </button>
+                  <button
+                    className="btn sm"
+                    onClick={() => setConfirmDeleteLocal(false)}
+                    disabled={deleting}
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -576,6 +652,18 @@ export default function ModDetailModal({
                 {confirmOverwrite ? '再点一次确认覆盖' : '用工坊版覆盖本地'}
               </button>
             </>
+          )}
+          {isLocal && (
+            <button
+              className="btn sm danger"
+              onClick={() =>
+                confirmDeleteLocal ? setConfirmDeleteLocal(false) : void openDeleteLocal()
+              }
+              title="删除这个本地 mod，连它的历史快照一起"
+            >
+              <IconTrash size={14} />
+              {confirmDeleteLocal ? '取消删除' : '删除本地 mod'}
+            </button>
           )}
         </div>
       </div>

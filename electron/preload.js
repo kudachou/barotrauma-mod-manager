@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld('api', {
   restoreSnapshot: (modName, id) => invoke('snapshot:restore', modName, id),
   deleteSnapshot: (modName, id) => invoke('snapshot:delete', modName, id),
 
+  // 删除本地 mod（连它的历史快照一起删）
+  localModFootprint: (modName) => invoke('localmod:footprint', modName),
+  deleteLocalMod: (modName, removeFromModlists) =>
+    invoke('localmod:delete', modName, removeFromModlists),
+
   // 一键备份所有工坊 mod 到 LocalMods
   planWorkshopBackup: () => invoke('backup:plan'),
   startWorkshopBackup: () => invoke('backup:start'),
