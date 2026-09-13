@@ -1,0 +1,62 @@
+{
+  "name": "barotrauma-mod-manager",
+  "productName": "潜渊症Mod管理器",
+  "version": "0.1.0",
+  "description": "潜渊症（Barotrauma）Mod 管理器：合集编排、一键应用到游戏、本地 mod 与创意工坊版本对比、封面、按功能分类",
+  "main": "electron/main.js",
+  "author": "kudachou",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kudachou/barotrauma-mod-manager.git"
+  },
+  "homepage": "https://github.com/kudachou/barotrauma-mod-manager#readme",
+  "bugs": {
+    "url": "https://github.com/kudachou/barotrauma-mod-manager/issues"
+  },
+  "keywords": [
+    "barotrauma",
+    "潜渊症",
+    "mod-manager",
+    "modlist",
+    "electron"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "electron .",
+    "app": "vite build && electron .",
+    "pack": "vite build && electron-builder"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "build": {
+    "appId": "com.example.barotraumamodmanager",
+    "productName": "潜渊症Mod管理器",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*"
+    ],
+    "icon": "build/icon.ico",
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "artifactName": "潜渊症Mod管理器-${version}.exe"
+  }
+}

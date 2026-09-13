@@ -1,0 +1,232 @@
+import type {
+  AppSettings,
+  CategoryData,
+  ModlistEntry,
+  ModlistFull,
+  ModlistSummary,
+  ScanResult
+} from './types';
+import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
+import { autoCategorize } from './categories';
+
+declare global {
+  interface Window {
+    api?: any;
+  }
+}
+
+const real: any = typeof window !== 'undefined' && (window as any).api ? (window as any).api : null;
+
+/** true 表示当前运行在浏览器预览模式（无 Electron 后端），使用内置示例数据 */
+export const isMock = !real;
+
+/* ----------------------- 浏览器预览用的内存状态 ----------------------- */
+
+const scan = buildMockScan();
+let state = {
+  mods: scan.mods.map((m) => ({ ...m })),
+  modlists: JSON.parse(JSON.stringify(mockModlists)) as ModlistFull[],
+  categories: JSON.parse(JSON.stringify(mockCategories)) as CategoryData,
+  settings: { ...mockSettings }
+};
+
+function summaries(): ModlistSummary[] {
+  return state.modlists.map((l) => ({ fileName: l.fileName, name: l.name, count: l.entries.length }));
+}
+
+function refreshUsedIn() {
+  for (const m of state.mods) m.usedIn = [];
+  for (const list of state.modlists) {
+    for (const e of list.entries) {
+      const target =
+        e.type === 'workshop'
+          ? state.mods.find((m) => m.source === 'workshop' && m.id === e.id)
+          : state.mods.find((m) => m.source === 'local' && m.id === e.name);
+      if (target && !target.usedIn.includes(list.name)) target.usedIn.push(list.name);
+    }
+  }
+}
+
+const mockApi = {
+  getSettings: async (): Promise<AppSettings> => ({ ...state.settings }),
+  saveSettings: async (s: AppSettings): Promise<ScanResult> => {
+    state.settings = { ...s };
+    return mockApi.scan();
+  },
+  pickFolder: async (_title?: string): Promise<string | null> => null,
+  pickFile: async (_title?: string, _filters?: unknown): Promise<string | null> => null,
+  pathExists: async (_p: string): Promise<boolean> => true,
+  detectPaths: async (): Promise<AppSettings> => ({ ...state.settings }),
+
+  scan: async (): Promise<ScanResult> => {
+    refreshUsedIn();
+    return {
+      mods: state.mods,
+      modlists: summaries(),
+      categories: state.categories,
+      settings: state.settings,
+      warnings: []
+    };
+  },
+
+  getModlist: async (fileName: string): Promise<ModlistFull | null> => {
+    const l = state.modlists.find((x) => x.fileName === fileName);
+    return l ? (JSON.parse(JSON.stringify(l)) as ModlistFull) : null;
+  },
+  saveModlist: async (fileName: string, name: string, entries: ModlistEntry[]): Promise<void> => {
+    const idx = state.modlists.findIndex((l) => l.fileName === fileName);
+    const payload: ModlistFull = { fileName, name, entries };
+    if (idx >= 0) state.modlists[idx] = payload;
+    else state.modlists.push(payload);
+    refreshUsedIn();
+  },
+
+  /** 把某个 mod 加入合集（合集不存在时自动创建） */
+  addModToModlist: async (fileName: string, name: string, entry: ModlistEntry): Promise<void> => {
+    let list = state.modlists.find((l) => l.fileName === fileName);
+    if (!list) {
+      list = { fileName, name, entries: [] };
+      state.modlists.push(list);
+    }
+    const dup =
+      entry.type === 'workshop'
+        ? list.entries.some((e) => e.type === 'workshop' && e.id === entry.id)
+        : list.entries.some((e) => e.type === 'local' && e.name === entry.name);
+    if (!dup) list.entries.push(entry);
+    refreshUsedIn();
+  },
+
+  /** 把某个 mod 从合集移出 */
+  removeModFromModlist: async (fileName: string, entry: ModlistEntry): Promise<void> => {
+    const list = state.modlists.find((l) => l.fileName === fileName);
+    if (!list) return;
+    list.entries = list.entries.filter((e) =>
+      entry.type === 'workshop'
+        ? !(e.type === 'workshop' && e.id === entry.id)
+        : !(e.type === 'local' && e.name === entry.name)
+    );
+    refreshUsedIn();
+  },
+  deleteModlist: async (fileName: string): Promise<void> => {
+    state.modlists = state.modlists.filter((l) => l.fileName !== fileName);
+    refreshUsedIn();
+  },
+  applyModlist: async (
+    name: string,
+    entries: ModlistEntry[]
+  ): Promise<{ ok: true; backup: string; missing: string[] }> => {
+    void name;
+    void entries;
+    return { ok: true, backup: '（预览模式未真正写入 config_player.xml）', missing: [] };
+  },
+
+  fetchPreviews: async (_ids: string[]): Promise<void> => {},
+  onPreviewReady: (_cb: (p: { id: string; localPath: string | null }) => void): void => {},
+
+  setLocalCover: async (sourceId: string): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = () => {
+        const f = input.files && input.files[0];
+        if (!f) return resolve(null);
+        resolve(URL.createObjectURL(f));
+      };
+      input.click();
+    });
+  },
+
+  getCategories: async (): Promise<CategoryData> => state.categories,
+  setModCategories: async (sourceId: string, tags: string[]): Promise<CategoryData> => {
+    if (tags.length) state.categories.mods[sourceId] = tags;
+    else delete state.categories.mods[sourceId];
+    const m = state.mods.find((x) => `${x.source}:${x.id}` === sourceId);
+    if (m) m.categories = tags;
+    return state.categories;
+  },
+  saveCategories: async (data: CategoryData): Promise<CategoryData> => {
+    state.categories = {
+      mods: data.mods || {},
+      custom: data.custom || [],
+      removed: data.removed || []
+    };
+    return state.categories;
+  },
+  /** 新建一个自定义标签（返回更新后的分类数据） */
+  addCustomCategory: async (name: string): Promise<CategoryData> => {
+    const n = (name || '').trim();
+    if (!n) return state.categories;
+    if (!state.categories.custom.includes(n)) state.categories.custom.push(n);
+    // 重新创建同名标签 → 从「已删除」里拿回来
+    state.categories.removed = state.categories.removed.filter((x) => x !== n);
+    return state.categories;
+  },
+  /** 删除标签：从自定义列表与所有 mod 上移除，并记入 removed */
+  deleteCategory: async (
+    name: string
+  ): Promise<{ categories: CategoryData; affected: number }> => {
+    const n = (name || '').trim();
+    if (!n) return { categories: state.categories, affected: 0 };
+
+    state.categories.custom = state.categories.custom.filter((x) => x !== n);
+
+    let affected = 0;
+    for (const key of Object.keys(state.categories.mods)) {
+      if (!state.categories.mods[key].includes(n)) continue;
+      affected++;
+      const next = state.categories.mods[key].filter((x) => x !== n);
+      if (next.length) state.categories.mods[key] = next;
+      else delete state.categories.mods[key];
+    }
+    if (!state.categories.removed.includes(n)) state.categories.removed.push(n);
+
+    // 同步到 mod 对象，让界面立刻反映（自动分类要重算，保证可恢复）
+    for (const m of state.mods) {
+      m.categories = state.categories.mods[`${m.source}:${m.id}`] || [];
+      m.autoCategories = autoCategorize(m.name).filter(
+        (c) => !state.categories.removed.includes(c)
+      );
+    }
+    return { categories: state.categories, affected };
+  },
+
+  getVersionDiff: async (localId: string): Promise<any> => {
+    const m = state.mods.find((x) => x.source === 'local' && x.id === localId);
+    return m ? { local: m, workshop: m.counterpart } : null;
+  },
+  overwriteLocalWithWorkshop: async (
+    _localId?: string,
+    _workshopId?: string
+  ): Promise<{ ok: true; backup: string }> => ({
+    ok: true,
+    backup: '（预览模式未真正覆盖）'
+  }),
+  copyWorkshopToLocal: async (
+    _workshopId?: string,
+    _newName?: string
+  ): Promise<{ ok: true; newFolder: string }> => ({
+    ok: true,
+    newFolder: '（预览模式未真正复制）'
+  }),
+
+  openPath: async (_p?: string): Promise<void> => {},
+  openModFolder: async (_p?: string): Promise<void> => {},
+  getWorkshopPage: async (_id?: string): Promise<void> => {}
+};
+
+export const api: typeof mockApi = real || mockApi;
+
+/** 把封面值转成 <img src> 可用的地址 */
+export function imgSrc(preview: string | null | undefined): string | null {
+  if (!preview) return null;
+  if (/^(https?:|blob:|data:)/i.test(preview)) return preview;
+  return 'local-img://local/?p=' + encodeURIComponent(preview);
+}
+
+/** 名称 → 稳定的占位色（深海色系：青绿 → 蓝 → 靛紫，保证网格整体协调） */
+export function placeholderHue(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 100000;
+  return 168 + (h % 112);
+}

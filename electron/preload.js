@@ -1,0 +1,50 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
+
+contextBridge.exposeInMainWorld('api', {
+  // settings
+  getSettings: () => invoke('settings:get'),
+  saveSettings: (s) => invoke('settings:save', s),
+  pickFolder: (title) => invoke('dialog:pickFolder', title),
+  pickFile: (title, filters) => invoke('dialog:pickFile', title, filters),
+  pathExists: (p) => invoke('fs:exists', p),
+  detectPaths: () => invoke('paths:detect'),
+
+  // scan
+  scan: () => invoke('scan'),
+
+  // modlists
+  getModlist: (fileName) => invoke('modlist:get', fileName),
+  saveModlist: (fileName, name, entries) => invoke('modlist:save', fileName, name, entries),
+  deleteModlist: (fileName) => invoke('modlist:delete', fileName),
+  addModToModlist: (fileName, name, entry) => invoke('modlist:addMod', fileName, name, entry),
+  removeModFromModlist: (fileName, entry) => invoke('modlist:removeMod', fileName, entry),
+  applyModlist: (name, entries) => invoke('modlist:apply', name, entries),
+
+  // previews
+  fetchPreviews: (ids) => invoke('previews:fetch', ids),
+  onPreviewReady: (cb) => {
+    ipcRenderer.on('previews:ready', (_e, payload) => cb(payload));
+  },
+
+  // covers (local mod manual cover)
+  setLocalCover: (sourceId, imagePath) => invoke('cover:set', sourceId, imagePath),
+
+  // categories
+  getCategories: () => invoke('categories:get'),
+  setModCategories: (sourceId, tags) => invoke('categories:setMod', sourceId, tags),
+  saveCategories: (data) => invoke('categories:save', data),
+  addCustomCategory: (name) => invoke('categories:addCustom', name),
+  deleteCategory: (name) => invoke('categories:deleteTag', name),
+
+  // version compare actions
+  getVersionDiff: (localId) => invoke('compare:diff', localId),
+  overwriteLocalWithWorkshop: (localId, workshopId) => invoke('compare:overwrite', localId, workshopId),
+  copyWorkshopToLocal: (workshopId, newName) => invoke('compare:copyToLocal', workshopId, newName),
+
+  // misc
+  openPath: (p) => invoke('shell:openPath', p),
+  openModFolder: (p) => invoke('shell:openPath', p),
+  getWorkshopPage: (id) => invoke('shell:openExternal', `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`)
+});
