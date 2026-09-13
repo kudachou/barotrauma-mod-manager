@@ -12,7 +12,8 @@ import type {
   BackupProgress,
   BackupResult,
   LocalModFootprint,
-  DeleteLocalModResult
+  DeleteLocalModResult,
+  WorkshopDetails
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -232,6 +233,45 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   },
   cancelWorkshopBackup: async (): Promise<boolean> => true,
   onBackupProgress: (_cb: (p: BackupProgress) => void): void => {},
+
+  // 预览模式：给一段示例描述，用来展示工坊描述的排版效果
+  getWorkshopDetails: async (id: string): Promise<WorkshopDetails | null> => {
+    const m = state.mods.find((x) => x.source === 'workshop' && x.id === id);
+    if (!m) return null;
+    return {
+      id,
+      title: m.name,
+      description: [
+        '[h1]关于这个 mod[/h1]',
+        '[b]这是预览模式下的示例描述[/b]，用来展示工坊描述的排版效果。真实运行时这里显示 mod 作者写的原文。',
+        '',
+        '[h2]功能[/h2]',
+        '[list]',
+        '[*]新增了一批物品与装备',
+        '[*]调整了部分数值平衡',
+        '[*]修复了若干已知问题',
+        '[/list]',
+        '',
+        '[h2]前置与兼容[/h2]',
+        '需要 [b]LuaCsForBarotrauma[/b] 作为前置。',
+        '详细说明见 [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2559634234]这个页面[/url]。',
+        '',
+        '[hr][/hr]',
+        '[i]最后更新：示例数据[/i]'
+      ].join('\n'),
+      previewUrl: null,
+      tags: m.autoCategories,
+      timeCreated: Math.floor(Date.now() / 1000) - 86400 * 400,
+      timeUpdated: Math.floor(Date.now() / 1000) - 86400 * 12,
+      fileSize: 42 * 1024 * 1024,
+      subscriptions: 12345,
+      favorited: 678,
+      views: 90123,
+      banned: false,
+      banReason: null,
+      fetchedAt: Date.now()
+    };
+  },
 
   setLocalCover: async (sourceId: string): Promise<string | null> => {
     return new Promise((resolve) => {

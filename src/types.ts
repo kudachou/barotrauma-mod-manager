@@ -144,6 +144,25 @@ export interface DeleteLocalModResult {
   removedFromModlists: string[];
 }
 
+/** 创意工坊条目详情（描述 / 标签 / 热度） */
+export interface WorkshopDetails {
+  id: string;
+  title: string | null;
+  description: string | null;
+  previewUrl: string | null;
+  tags: string[];
+  timeCreated: number | null;
+  timeUpdated: number | null;
+  fileSize: number | null;
+  subscriptions: number;
+  favorited: number;
+  views: number;
+  banned: boolean;
+  banReason: string | null;
+  /** 缓存时间戳 */
+  fetchedAt?: number;
+}
+
 export interface BackupPlanItem {
   id: string;
   name: string;

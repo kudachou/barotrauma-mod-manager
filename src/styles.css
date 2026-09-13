@@ -1533,3 +1533,114 @@ select.input option {
   cursor: pointer;
   flex: none;
 }
+
+/* ======================= 创意工坊描述 ======================= */
+
+.ws-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-wrap {
+  position: relative;
+  max-height: 190px;
+  overflow: hidden;
+  padding: 13px 15px;
+  border-radius: 11px;
+  background: rgba(8, 14, 26, 0.5);
+  border: 1px solid var(--border);
+}
+
+.ws-wrap.open {
+  max-height: 460px;
+  overflow-y: auto;
+}
+
+/* 折叠时底部渐隐，暗示还有内容 */
+.ws-wrap:not(.open)::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 52px;
+  background: linear-gradient(180deg, rgba(8, 14, 26, 0), rgba(8, 14, 26, 0.96));
+  pointer-events: none;
+}
+
+.ws-body {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-2);
+  word-break: break-word;
+}
+
+.ws-h {
+  font-weight: 700;
+  color: var(--text);
+  margin: 14px 0 6px;
+}
+
+.ws-h:first-child {
+  margin-top: 0;
+}
+
+.ws-h1 {
+  font-size: 15px;
+}
+
+.ws-h2 {
+  font-size: 14px;
+}
+
+.ws-h3 {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.ws-p {
+  margin: 0 0 9px;
+  white-space: pre-wrap;
+}
+
+.ws-p:last-child {
+  margin-bottom: 0;
+}
+
+.ws-ul {
+  margin: 0 0 9px;
+  padding-left: 20px;
+}
+
+.ws-ul li {
+  margin-bottom: 3px;
+}
+
+.ws-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+
+.ws-quote {
+  margin: 0 0 9px;
+  padding: 6px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-3);
+}
+
+.ws-link {
+  color: var(--accent-2);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ws-link:hover {
+  color: var(--accent);
+}

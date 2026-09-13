@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { LocalModFootprint, ModInfo, ModlistSummary, Snapshot } from '../types';
+import type {
+  LocalModFootprint,
+  ModInfo,
+  ModlistSummary,
+  Snapshot,
+  WorkshopDetails
+} from '../types';
 import { api, imgSrc, placeholderHue } from '../api';
 import { categoryStyle } from '../categories';
 import { compareBadge, fmtDate, initials, modKey, uniq } from '../ui';
 import { humanSize } from './BackupModal';
+import { WorkshopText } from '../workshopText';
 import {
   IconAlert,
   IconCheck,
@@ -23,6 +30,14 @@ function fmtDateTime(ms: number): string {
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 订阅数之类的大数字，超过一万用「万」显示 */
+function fmtCount(n: number): string {
+  if (!n) return '0';
+  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }
 
 export default function ModDetailModal({
@@ -72,8 +87,37 @@ export default function ModDetailModal({
   const [footprint, setFootprint] = useState<LocalModFootprint | null>(null);
   const [removeFromLists, setRemoveFromLists] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [wsDetails, setWsDetails] = useState<WorkshopDetails | null>(null);
+  const [wsLoading, setWsLoading] = useState(false);
+  const [wsError, setWsError] = useState<string | null>(null);
+  const [wsExpanded, setWsExpanded] = useState(false);
 
   const isLocal = mod.source === 'local';
+  /** 本地 mod 靠 filelist 里的 steamworkshopid 找到它对应的工坊条目 */
+  const workshopId = mod.source === 'workshop' ? mod.id : mod.steamworkshopid;
+
+  useEffect(() => {
+    setWsExpanded(false);
+    setWsError(null);
+    setWsDetails(null);
+    if (!workshopId) return;
+    let alive = true;
+    setWsLoading(true);
+    api
+      .getWorkshopDetails(workshopId)
+      .then((d) => {
+        if (alive) setWsDetails(d);
+      })
+      .catch((e: any) => {
+        if (alive) setWsError(String(e?.message || e));
+      })
+      .finally(() => {
+        if (alive) setWsLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [workshopId]);
 
   const loadSnapshots = useCallback(async () => {
     if (!isLocal) {
@@ -320,6 +364,87 @@ export default function ModDetailModal({
                     ，无法自动匹配创意工坊版本（可能是原创 mod 或自改 mod）。
                   </div>
                 </div>
+              )}
+            </>
+          )}
+
+          {workshopId && (
+            <>
+              <div className="section-title">创意工坊描述</div>
+
+              {wsLoading ? (
+                <div className="hint" style={{ marginBottom: 0 }}>
+                  正在从 Steam 读取…
+                </div>
+              ) : wsError ? (
+                <div className="warn-bar" style={{ marginBottom: 0 }}>
+                  <IconAlert size={16} />
+                  <div>读取失败：{wsError}</div>
+                </div>
+              ) : !wsDetails ? (
+                <div className="hint" style={{ marginBottom: 0 }}>
+                  工坊上没有这个条目（可能已下架或作者设为不公开）。
+                </div>
+              ) : (
+                <>
+                  {wsDetails.banned && (
+                    <div className="danger-bar" style={{ marginTop: 0, marginBottom: 12 }}>
+                      <IconAlert size={16} />
+                      <div>
+                        这个条目在工坊上已被封禁
+                        {wsDetails.banReason ? `：${wsDetails.banReason}` : '。'}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="ws-stats">
+                    <span>订阅 {fmtCount(wsDetails.subscriptions)}</span>
+                    <span>收藏 {fmtCount(wsDetails.favorited)}</span>
+                    <span>浏览 {fmtCount(wsDetails.views)}</span>
+                    {wsDetails.timeUpdated ? (
+                      <span>更新于 {fmtDate(wsDetails.timeUpdated * 1000)}</span>
+                    ) : null}
+                  </div>
+
+                  {wsDetails.tags.length > 0 && (
+                    <div className="tag-edit" style={{ margin: '0 0 12px' }}>
+                      {wsDetails.tags.map((t) => (
+                        <span key={t} className="badge ver">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {wsDetails.description?.trim() ? (
+                    <>
+                      <div className={`ws-wrap ${wsExpanded ? 'open' : ''}`}>
+                        <WorkshopText
+                          text={wsDetails.description}
+                          onOpenLink={(u) => void api.openExternal(u)}
+                        />
+                      </div>
+                      <button
+                        className="btn sm"
+                        style={{ marginTop: 10 }}
+                        onClick={() => setWsExpanded((v) => !v)}
+                      >
+                        {wsExpanded ? '收起描述' : '展开全部描述'}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="hint" style={{ marginBottom: 0 }}>
+                      作者没有填写描述。
+                    </div>
+                  )}
+
+                  <div className="btn-row" style={{ marginTop: 10 }}>
+                    <button className="btn sm" onClick={() => void api.getWorkshopPage(workshopId)}>
+                      <IconExternal size={14} />
+                      在工坊页面打开
+                    </button>
+                  </div>
+                </>
               )}
             </>
           )}

@@ -36,6 +36,7 @@ const {
 } = require('./backup');
 const {
   fetchDetails,
+  getWorkshopDetails,
   downloadPreview,
   cachedPreview,
   missFresh,
@@ -278,8 +279,13 @@ function registerIpc() {
     return { queued: need.length, cached: cachedCount };
   });
 
-  ipcMain.handle('cover:set', async (_e, sourceId, imagePath) => {
-    const key = String(sourceId || '');
+  /* ------------------------------ 工坊详情 ------------------------------ */
+
+  ipcMain.handle('workshop:details', (_e, id, force) =>
+    getWorkshopDetails(id, path.join(userDataDir(), 'workshop'), { force: !!force })
+  );
+
+  ipcMain.handle('cover:set', async (_e, sourceId, imagePath) => {    const key = String(sourceId || '');
     if (!key) return null;
 
     let src = imagePath ? String(imagePath) : null;

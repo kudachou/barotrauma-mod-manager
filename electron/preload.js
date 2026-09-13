@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('previews:ready', (_e, payload) => cb(payload));
   },
 
+  // 工坊详情（描述 / 标签 / 热度）
+  getWorkshopDetails: (id, force) => invoke('workshop:details', id, force),
+
   // covers (local mod manual cover)
   setLocalCover: (sourceId, imagePath) => invoke('cover:set', sourceId, imagePath),
 

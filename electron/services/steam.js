@@ -92,10 +92,13 @@ function writeMiss(id, cacheDir) {
 
 /**
  * 用 Steam 公开接口批量取条目信息（不需要 API Key）。
- * 返回 Map<id, { result, title, previewUrl, timeUpdated, fileSize }>。
+ * 返回 Map<id, {...}>。
  * 请求整体失败时返回的 Map 里就没有对应 id —— 调用方据此区分「暂时失败」与「确实没有封面」。
+ *
+ * withDescription=true 时会一并取回工坊描述（每条可能有几千字，批量拉会明显变大，按需开启）。
  */
-async function fetchDetails(ids) {
+async function fetchDetails(ids, options = {}) {
+  const { withDescription = false } = options;
   const out = new Map();
   const list = Array.from(new Set((ids || []).map(String).filter(Boolean)));
 
@@ -119,16 +122,60 @@ async function fetchDetails(ids) {
 
     const details = (json && json.response && json.response.publishedfiledetails) || [];
     for (const d of details) {
-      out.set(String(d.publishedfileid), {
+      const base = {
         result: d.result,
         title: d.title || null,
         previewUrl: d.preview_url || null,
         timeUpdated: d.time_updated || null,
-        fileSize: d.file_size || null
-      });
+        fileSize: d.file_size || null,
+        // 这些本来就在返回里，顺手带上：分类、热度、状态
+        tags: Array.isArray(d.tags) ? d.tags.map((t) => t && t.tag).filter(Boolean) : [],
+        timeCreated: d.time_created || null,
+        subscriptions: Number(d.subscriptions) || 0,
+        favorited: Number(d.favorited) || 0,
+        views: Number(d.views) || 0,
+        banned: d.banned === 1 || d.banned === true,
+        banReason: d.ban_reason || null
+      };
+      if (withDescription) base.description = d.description || null;
+      out.set(String(d.publishedfileid), base);
     }
   }
   return out;
+}
+
+/**
+ * 取单个 mod 的工坊详情（描述 / 标签 / 热度），带本地缓存。
+ * 缓存 7 天；网络失败时退回旧缓存，实在没有就返回 null。
+ */
+async function getWorkshopDetails(id, cacheDir, options = {}) {
+  const key = String(id || '').trim();
+  if (!key) return null;
+
+  const file = path.join(cacheDir, `${key}.json`);
+  const readCache = () => {
+    try {
+      return JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+
+  const cached = readCache();
+  const fresh = cached && Date.now() - (cached.fetchedAt || 0) < 7 * 24 * 60 * 60 * 1000;
+  if (fresh && !options.force) return cached;
+
+  try {
+    const map = await fetchDetails([key], { withDescription: true });
+    const d = map.get(key);
+    if (!d) return cached; // 拿不到就退回旧缓存（可能为 null）
+    const out = { id: key, ...d, fetchedAt: Date.now() };
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(out), 'utf8');
+    return out;
+  } catch {
+    return cached;
+  }
 }
 
 function extFromContentType(ct, url) {
@@ -191,6 +238,7 @@ function createQueue(concurrency, delayMs) {
 
 module.exports = {
   fetchDetails,
+  getWorkshopDetails,
   downloadPreview,
   cachedPreview,
   missFresh,

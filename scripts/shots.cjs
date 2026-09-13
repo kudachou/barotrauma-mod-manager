@@ -367,6 +367,37 @@ app.whenReady().then(async () => {
   console.log('workshop detail list-chips=' + hasListSection);
   await shot(win, '06-workshop-detail');
 
+  // 验证工坊描述的解析与渲染（BBCode → 结构化节点）
+  console.log(
+    'workshop-desc=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const body = document.querySelector('.ws-body');
+          if (!body) return { present: false };
+          return {
+            present: true,
+            headings: Array.from(body.querySelectorAll('.ws-h')).map((x) => x.textContent.trim()),
+            listItems: Array.from(body.querySelectorAll('.ws-ul li')).map((x) => x.textContent.trim()),
+            links: Array.from(body.querySelectorAll('.ws-link')).map((x) => x.textContent.trim()),
+            hasHr: !!body.querySelector('.ws-hr'),
+            hasBold: !!body.querySelector('b'),
+            hasItalic: !!body.querySelector('i'),
+            rawBbcodeLeft: /\\[(b|i|url|h1|h2|h3|list)\\]/i.test(body.textContent),
+            stats: Array.from(document.querySelectorAll('.ws-stats span')).map((x) => x.textContent.trim())
+          };
+        })()`)
+      )
+  );
+  // 展开描述再截一张，确认排版
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal .btn')).find((x) =>
+      x.textContent.includes('展开全部描述')
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(400);
+  await shot(win, '16-workshop-desc');
+
   console.log('ERRORS ' + JSON.stringify(errors, null, 1));
   app.exit(0);
 });
