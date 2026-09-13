@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, isMock } from './api';
-import type { AppSettings, ModInfo, ModlistEntry, ModlistSummary, ScanResult, ViewKey } from './types';
+import type {
+  AppSettings,
+  ModInfo,
+  ModlistEntry,
+  ModlistSummary,
+  ScanResult,
+  UpdateState,
+  ViewKey
+} from './types';
 import { ALL_CATEGORIES } from './categories';
 import { safeFileName, uniq } from './ui';
 import Sidebar from './components/Sidebar';
@@ -8,6 +16,7 @@ import LibraryView from './components/LibraryView';
 import CollectionsView from './components/CollectionsView';
 import SettingsView from './components/SettingsView';
 import ModDetailModal from './components/ModDetailModal';
+import UpdateBanner from './components/UpdateBanner';
 import Toasts, { type ToastItem } from './components/Toasts';
 import { IconAlert, IconRefresh } from './components/Icons';
 
@@ -24,6 +33,9 @@ export default function App() {
   const [selected, setSelected] = useState<ModInfo | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
+  const [update, setUpdate] = useState<UpdateState | null>(null);
+  /** 用户点了「稍后」的版本号，同一个版本不再弹 */
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const toastSeq = useRef(0);
 
   const pushToast = useCallback(
@@ -67,6 +79,43 @@ export default function App() {
       );
     });
   }, []);
+
+  // 更新：注册事件推送 + 启动时静默检查一次
+  useEffect(() => {
+    api.onUpdaterEvent((s: UpdateState) => setUpdate(s));
+    void (async () => {
+      try {
+        await api.updaterStatus();
+        setUpdate(await api.updaterCheck());
+      } catch {
+        /* 检查更新失败不影响正常使用 */
+      }
+    })();
+  }, []);
+
+  const checkUpdate = useCallback(async () => {
+    try {
+      setUpdate(await api.updaterCheck());
+    } catch (e: any) {
+      pushToast('err', '检查更新失败', String(e?.message || e));
+    }
+  }, [pushToast]);
+
+  const downloadUpdate = useCallback(async () => {
+    try {
+      setUpdate(await api.updaterDownload());
+    } catch (e: any) {
+      pushToast('err', '下载更新失败', String(e?.message || e));
+    }
+  }, [pushToast]);
+
+  const installUpdate = useCallback(async () => {
+    try {
+      await api.updaterInstall();
+    } catch (e: any) {
+      pushToast('err', '启动安装失败', String(e?.message || e));
+    }
+  }, [pushToast]);
 
   const mods = data?.mods || [];
   const modlists = data?.modlists || [];
@@ -252,6 +301,15 @@ export default function App() {
         </div>
 
         <div className="content">
+          {update && update.latestVersion !== dismissedVersion && (
+            <UpdateBanner
+              state={update}
+              onDownload={downloadUpdate}
+              onInstall={installUpdate}
+              onDismiss={() => setDismissedVersion(update.latestVersion)}
+            />
+          )}
+
           {isMock && (
             <div className="warn-bar">
               <IconAlert size={16} />
@@ -282,7 +340,15 @@ export default function App() {
           )}
 
           {view === 'settings' && data && (
-            <SettingsView settings={data.settings} onSave={saveSettings} onToast={pushToast} />
+            <SettingsView
+              settings={data.settings}
+              onSave={saveSettings}
+              onToast={pushToast}
+              update={update}
+              onCheckUpdate={checkUpdate}
+              onDownloadUpdate={downloadUpdate}
+              onInstallUpdate={installUpdate}
+            />
           )}
         </div>
       </div>

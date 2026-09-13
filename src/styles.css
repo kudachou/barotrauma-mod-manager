@@ -1262,6 +1262,64 @@ select.input option {
   margin-bottom: 14px;
 }
 
+/* ============================ 更新提示条 ============================ */
+
+.update-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: none;
+  padding: 12px 15px;
+  border-radius: 11px;
+  background: linear-gradient(90deg, rgba(79, 209, 197, 0.14), rgba(56, 189, 248, 0.07));
+  border: 1px solid rgba(79, 209, 197, 0.32);
+  color: #9ff0e6;
+  font-size: 13px;
+  line-height: 1.55;
+  margin-bottom: 14px;
+}
+
+.update-bar .ub-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.update-bar .ub-sub {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+.ub-progress {
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(125, 175, 225, 0.16);
+  overflow: hidden;
+  margin-top: 7px;
+}
+
+.ub-progress > div {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.25s ease;
+}
+
+.release-notes {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 11px 13px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: rgba(8, 14, 26, 0.5);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
 .toolbar {
   display: flex;
   align-items: center;

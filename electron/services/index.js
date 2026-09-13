@@ -20,6 +20,7 @@ const {
   xmlEscape
 } = require('./modlists');
 const { applyToGame, stamp } = require('./config');
+const { registerUpdaterIpc } = require('./updater');
 const {
   fetchDetails,
   downloadPreview,
@@ -383,6 +384,10 @@ function registerIpc() {
     }
     return { ok: true, newFolder: destDir };
   });
+
+  /* -------------------------------- 更新 -------------------------------- */
+
+  registerUpdaterIpc(ipcMain);
 
   /* -------------------------------- 杂项 -------------------------------- */
 

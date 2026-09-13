@@ -4,7 +4,8 @@ import type {
   ModlistEntry,
   ModlistFull,
   ModlistSummary,
-  ScanResult
+  ScanResult,
+  UpdateState
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -47,8 +48,22 @@ function refreshUsedIn() {
   }
 }
 
-const mockApi = {
-  getSettings: async (): Promise<AppSettings> => ({ ...state.settings }),
+/** 预览模式下的更新状态：没有安装包，直接告诉界面"不支持" */
+function mockUpdateState(): UpdateState {
+  return {
+    status: 'unsupported',
+    supported: false,
+    currentVersion: '0.1.0',
+    latestVersion: null,
+    releaseNotes: null,
+    releaseDate: null,
+    progress: null,
+    error: null,
+    checkedAt: null
+  };
+}
+
+const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.settings }),
   saveSettings: async (s: AppSettings): Promise<ScanResult> => {
     state.settings = { ...s };
     return mockApi.scan();
@@ -122,6 +137,13 @@ const mockApi = {
 
   fetchPreviews: async (_ids: string[]): Promise<void> => {},
   onPreviewReady: (_cb: (p: { id: string; localPath: string | null }) => void): void => {},
+
+  // 预览模式下没有安装包，更新功能不可用
+  updaterStatus: async (): Promise<UpdateState> => mockUpdateState(),
+  updaterCheck: async (): Promise<UpdateState> => mockUpdateState(),
+  updaterDownload: async (): Promise<UpdateState> => mockUpdateState(),
+  updaterInstall: async (): Promise<boolean> => false,
+  onUpdaterEvent: (_cb: (s: UpdateState) => void): void => {},
 
   setLocalCover: async (sourceId: string): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -212,6 +234,7 @@ const mockApi = {
 
   openPath: async (_p?: string): Promise<void> => {},
   openModFolder: async (_p?: string): Promise<void> => {},
+  openExternal: async (_url?: string): Promise<void> => {},
   getWorkshopPage: async (_id?: string): Promise<void> => {}
 };
 

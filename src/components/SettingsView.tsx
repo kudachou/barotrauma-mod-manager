@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react';
-import type { AppSettings } from '../types';
+import type { AppSettings, UpdateState } from '../types';
 import { api } from '../api';
-import { IconCheck, IconAlert, IconFolder, IconSave, IconSearch } from './Icons';
+import {
+  IconCheck,
+  IconAlert,
+  IconFolder,
+  IconSave,
+  IconSearch,
+  IconDownload,
+  IconRefresh,
+  IconExternal
+} from './Icons';
 
 type PathKey = keyof AppSettings;
 
@@ -34,14 +43,46 @@ const ROWS: { key: PathKey; label: string; hint: string; kind: 'folder' | 'file'
   }
 ];
 
+const REPO_URL = 'https://github.com/kudachou/barotrauma-mod-manager';
+
+function updateStatusText(u: UpdateState | null): string {
+  if (!u) return '';
+  switch (u.status) {
+    case 'checking':
+      return '正在检查更新…';
+    case 'available':
+      return `发现新版本 v${u.latestVersion}`;
+    case 'downloading':
+      return `正在下载 v${u.latestVersion}…`;
+    case 'downloaded':
+      return `v${u.latestVersion} 已下载，等待安装`;
+    case 'up-to-date':
+      return '已是最新版本';
+    case 'error':
+      return `检查失败：${u.error || '未知错误'}`;
+    case 'unsupported':
+      return '当前环境不支持自动更新';
+    default:
+      return '';
+  }
+}
+
 export default function SettingsView({
   settings,
   onSave,
-  onToast
+  onToast,
+  update,
+  onCheckUpdate,
+  onDownloadUpdate,
+  onInstallUpdate
 }: {
   settings: AppSettings;
   onSave: (s: AppSettings) => Promise<void>;
   onToast: (kind: 'ok' | 'warn' | 'err' | 'info', title: string, msg?: string) => void;
+  update: UpdateState | null;
+  onCheckUpdate: () => Promise<void>;
+  onDownloadUpdate: () => Promise<void>;
+  onInstallUpdate: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [exists, setExists] = useState<Record<string, boolean | undefined>>({});
@@ -184,6 +225,67 @@ export default function SettingsView({
           3. 先备份 <code>config_player.xml</code>（带时间戳），再只替换其中的
           <code>contentpackages</code> 段，其余设置原样保留。
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>关于与更新</h3>
+        <div className="hint" style={{ marginBottom: 14 }}>
+          当前版本 <b>v{update?.currentVersion || '—'}</b>
+          {update && (
+            <span style={{ marginLeft: 12, color: 'var(--text-3)' }}>
+              {updateStatusText(update)}
+            </span>
+          )}
+        </div>
+
+        {update?.status === 'unsupported' ? (
+          <div className="path-status idle">
+            <IconAlert size={13} />
+            开发 / 预览模式下不可用。安装版会在启动时自动检查更新，并支持一键下载重启安装。
+          </div>
+        ) : (
+          <>
+            {update?.status === 'downloading' && (
+              <div className="ub-progress" style={{ marginBottom: 14 }}>
+                <div style={{ width: `${Math.min(100, update.progress?.percent || 0)}%` }} />
+              </div>
+            )}
+
+            {update?.status === 'available' && update.releaseNotes && (
+              <div className="release-notes">{update.releaseNotes}</div>
+            )}
+
+            <div className="btn-row">
+              <button
+                className="btn"
+                onClick={onCheckUpdate}
+                disabled={update?.status === 'checking' || update?.status === 'downloading'}
+              >
+                <IconSearch size={15} />
+                {update?.status === 'checking' ? '检查中…' : '检查更新'}
+              </button>
+
+              {update?.status === 'available' && (
+                <button className="btn primary" onClick={onDownloadUpdate}>
+                  <IconDownload size={15} />
+                  下载 v{update.latestVersion}
+                </button>
+              )}
+
+              {update?.status === 'downloaded' && (
+                <button className="btn primary" onClick={onInstallUpdate}>
+                  <IconRefresh size={15} />
+                  立即重启安装
+                </button>
+              )}
+
+              <button className="btn" onClick={() => api.openExternal(`${REPO_URL}/releases`)}>
+                <IconExternal size={15} />
+                更新日志
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

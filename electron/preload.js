@@ -43,8 +43,18 @@ contextBridge.exposeInMainWorld('api', {
   overwriteLocalWithWorkshop: (localId, workshopId) => invoke('compare:overwrite', localId, workshopId),
   copyWorkshopToLocal: (workshopId, newName) => invoke('compare:copyToLocal', workshopId, newName),
 
+  // 更新
+  updaterStatus: () => invoke('updater:status'),
+  updaterCheck: () => invoke('updater:check'),
+  updaterDownload: () => invoke('updater:download'),
+  updaterInstall: () => invoke('updater:install'),
+  onUpdaterEvent: (cb) => {
+    ipcRenderer.on('updater:event', (_e, state) => cb(state));
+  },
+
   // misc
   openPath: (p) => invoke('shell:openPath', p),
   openModFolder: (p) => invoke('shell:openPath', p),
+  openExternal: (url) => invoke('shell:openExternal', url),
   getWorkshopPage: (id) => invoke('shell:openExternal', `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`)
 });

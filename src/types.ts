@@ -83,3 +83,34 @@ export interface ScanResult {
 }
 
 export type ViewKey = 'library' | 'collections' | 'settings';
+
+/** 更新状态 */
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'up-to-date'
+  | 'error'
+  | 'unsupported';
+
+export interface UpdateProgress {
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond?: number;
+}
+
+export interface UpdateState {
+  status: UpdateStatus;
+  /** 打包后的安装版才支持自动更新；开发模式为 false */
+  supported: boolean;
+  currentVersion: string | null;
+  latestVersion: string | null;
+  releaseNotes: string | null;
+  releaseDate: string | null;
+  progress: UpdateProgress | null;
+  error: string | null;
+  checkedAt: number | null;
+}

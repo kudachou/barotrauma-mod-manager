@@ -28,7 +28,9 @@
     "app": "vite build && electron .",
     "pack": "vite build && electron-builder"
   },
-  "dependencies": {},
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -53,10 +55,24 @@
     "icon": "build/icon.ico",
     "win": {
       "target": [
-        "portable"
+        "nsis"
       ],
       "icon": "build/icon.ico"
     },
-    "artifactName": "潜渊症Mod管理器-${version}.exe"
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "潜渊症 Mod 管理器",
+      "artifactName": "barotrauma-mod-manager-setup-${version}.exe"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kudachou",
+        "repo": "barotrauma-mod-manager"
+      }
+    ]
   }
 }

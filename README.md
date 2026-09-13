@@ -36,9 +36,21 @@
 
 ## 运行
 
-从 [Releases](../../releases) 下载 `潜渊症Mod管理器-<版本>.exe`，双击即用，无需安装。
+从 [Releases](../../releases) 下载 `barotrauma-mod-manager-setup-<版本>.exe`，双击安装（**按用户安装，不需要管理员权限**，装到 `%LocalAppData%\Programs\`）。
 
 首次打开会自动扫描常见 Steam 安装位置来填充目录设置；没检测到就在「设置」页点「自动检测」或手动指定。
+
+### 自动更新
+
+装好之后**不用再手动下载**：
+
+- 每次启动会静默向 GitHub 查一次新版本，有更新时界面顶部出现提示条
+- 点「下载更新」→ 下载完点「立即重启安装」→ 程序自动重启到新版本
+- 也可以在「设置 → 关于与更新」里手动检查，并查看更新说明
+
+> 更新走的是 [electron-updater](https://www.electron.build/auto-update) + GitHub Releases：
+> 它会读取最新 release 里的 `latest.yml`，与当前版本比较，然后下载安装包。
+> 所以**发布新版本时 `latest.yml` 必须一起上传**，否则更新会失败（见下面的「发布新版本」）。
 
 ### 需要填的 6 个目录
 
@@ -67,9 +79,20 @@ pnpm app            # 构建界面 + 启动桌面客户端
 | `pnpm dev` | 只跑界面开发服务器（浏览器打开，走内置示例数据） |
 | `pnpm build` | 只构建界面产物到 `dist/` |
 | `pnpm start` | 用已构建的 `dist/` 启动桌面客户端 |
-| `pnpm run pack` | 打包成便携 exe（输出到 `release/`） |
+| `pnpm run pack` | 打包成 NSIS 安装包（输出到 `release/`） |
 
 > 要用 `pnpm run pack`。裸写 `pnpm pack` 会命中 pnpm 自己的内置命令（打 npm 包），不会走这里的打包脚本。
+
+打包产物有三个，缺一不可：
+
+```
+release\barotrauma-mod-manager-setup-<版本>.exe            安装包
+release\barotrauma-mod-manager-setup-<版本>.exe.blockmap   增量更新用
+release\latest.yml                                        自动更新清单
+```
+
+> 安装包文件名刻意用 ASCII：`latest.yml` 里的 `path` 必须和实际上传的文件名**完全一致**，
+> 用中文名时 electron-builder 生成的两者会对不上，导致更新 404。
 
 图标由 `node scripts/make-icon.cjs` 生成 —— 纯 Node 手写 PNG 编码 + ICO 封装，不依赖任何图形库。
 
@@ -100,6 +123,32 @@ ERROR: Cannot create symbolic link … 客户端没有所需的特权。
 2. 开启 Windows 开发者模式（设置 → 系统 → 开发者选项），账号即可获得该特权。
 
 </details>
+
+## 发布新版本
+
+1. 改 `package.json` 里的 `version`（例如 `0.1.0` → `0.2.0`）。**不改版本号客户端不会认为有更新。**
+2. 打包：
+
+   ```bash
+   pnpm run pack
+   ```
+
+3. 到 [Releases](../../releases) → **Draft a new release**：
+   - **Choose a tag** 填 `v0.2.0`（与 `version` 保持一致）→ 点 **Create new tag**
+   - 上传**两个**文件（只传 exe 是不够的）：
+     - `release\barotrauma-mod-manager-setup-0.2.0.exe`
+     - `release\latest.yml`
+   - ⚠️ **不要勾 `Set as a pre-release`** —— 预发布版本客户端会直接跳过
+   - 点 **Publish release**
+
+4. 老版本客户端下次启动就会提示更新，点两下即可完成升级。
+
+> 也可以让 electron-builder 自己建 release 并上传，省掉手动传文件：
+>
+> ```powershell
+> $env:GH_TOKEN='<有 repo 权限的 token>'
+> pnpm run pack -- --publish always
+> ```
 
 ## 工作原理
 
@@ -198,6 +247,7 @@ electron/            主进程
     config.js        应用到 config_player.xml
     steam.js         工坊封面（公开接口 + 缓存）
     categories.js    分类规则与标签持久化
+    updater.js       自动更新（electron-updater + GitHub Releases）
 src/                 界面（React + TypeScript，无 UI 框架依赖，手写 CSS）
 scripts/             自检与工具脚本
 ```
