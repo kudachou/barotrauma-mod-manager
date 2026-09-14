@@ -1,9 +1,10 @@
 import type { ViewKey } from '../types';
-import { IconAnchor, IconLayers, IconLibrary, IconSettings } from './Icons';
+import { IconAnchor, IconLayers, IconLibrary, IconSave, IconSettings } from './Icons';
 
 const ITEMS: { key: ViewKey; label: string; icon: (p: { size?: number }) => JSX.Element }[] = [
   { key: 'library', label: 'Mod 库', icon: IconLibrary },
   { key: 'collections', label: '合集', icon: IconLayers },
+  { key: 'saves', label: '存档', icon: IconSave },
   { key: 'settings', label: '设置', icon: IconSettings }
 ];
 

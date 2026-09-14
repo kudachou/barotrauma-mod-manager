@@ -41,6 +41,13 @@
 **启动游戏**
 - 顶部「启动游戏」一键拉起潜渊症；找不到 exe 时自动交回 Steam 启动
 
+**存档**
+- **看每个存档当时启用了哪些 mod**：直接解析 `.save`（gzip 压缩的 XML）里的
+  `selectedcontentpackagenames`，按**加载顺序**列出，并标出哪些 mod 现在游戏里已经没有了
+- **找到能用它实现该存档的合集**：标出「完全一致」或「某某合集完全覆盖了它」，
+  并把合集里多出来的 mod 逐个列出来；一键「应用」那个合集，或「按存档启用」直接新建合集并应用
+- 存档从 `config_player.xml` 的 `savepath` 读取（为空时用默认位置），单机与多人存档分开列
+
 **备份与回滚**
 - **一键备份所有工坊 mod 到本地**：全量复制进 `LocalMods`，工坊更新或下架都不怕
   - 先规划再执行：先告诉你占多少磁盘、几个新建几个更新，确认后才动手
@@ -58,6 +65,8 @@
 ## 截图
 
 ![合集](docs/screenshot-collections.png)
+
+![存档](docs/screenshot-saves.png)
 
 ## 运行
 
@@ -286,6 +295,38 @@ Steam 把订阅的 mod 下载到 `steamapps\workshop\content\<appid>\<id>`，
 （游戏不在运行时，工坊更新只会躺在那里等着）。
 所以这个功能既插不进手，也会让人误以为管理器能管更新流程。
 
+### 存档里记录的 mod 名单（以及为什么不能用「完全一致」判对应合集）
+
+存档是 **gzip 压缩**的，解压后开头有一小段 UTF-16LE 文件名（`gamesession.xml`），之后才是 XML。
+根元素 `<Gamesession>` 上带 `selectedcontentpackagenames="Vanilla|modA|modB|…"` ——
+这是**当时启用的内容包名，按加载顺序**（就是这个存档实现所需的那套），另有 `savetime`、
+`submarine`、`version`。老的 1.11.5 存档也有这些字段。全文里 `package` 只出现这一处，
+**存档没有第二份 mod 记录**。
+
+关键的一点：**这份名单不记录纯客户端型内容包**。用真实存档验证过：
+
+```
+9 个存档（2026/1 ~ 2026/9）全都启用了 Lua 类 mod
+  （Vertical Engine Lua、Scannable wild plants (Lua) …）
+但 LuaCsForBarotrauma 框架一次都没出现在任何存档里
+```
+
+没有 LuaCs，那些 Lua mod 根本跑不起来 —— 所以它一直启用着，只是存档不记它。
+「测试」合集比最新存档多出来的 7 个，全部是这类：LuaCs（`Binary/Lua`）、
+`Enhanced Immersion (lua only)`（只有 `Lua`）、`BetterHealthUI`（`CSharp/Localization`）、
+两个 `ItemIO`（`CSharp`）、`Press-R-to-Reload`。
+
+所以界面上「对应合集」判定用的是**两个精确关系**，而不是相似度估算：
+
+| 关系 | 含义 |
+| --- | --- |
+| **完全一致** | 存档的 mod 集合 == 合集集合（很少见） |
+| **完全覆盖** | 存档的 mod 全在合集里（合集另有若干个，界面会逐个列出来） |
+| 都没有 | 如实说「没有能覆盖它的合集」，而不是猜一个最像的 |
+
+用覆盖它的合集去实现存档**永远安全**（只多不少）；而「按存档启用」只写存档记录里的 mod，
+可能漏掉 LuaCs 这类框架，所以界面上会明确提示这一点，并且有覆盖合集时主按钮是「应用那个合集」。
+
 ## 安全说明
 
 - **应用合集**：先备份再写，只动 `<contentpackages>` 段，段外逐字节不变，缺段则中止。
@@ -330,6 +371,7 @@ electron/            主进程
     mods.js          扫描 mod、解析 filelist.xml、版本对比
     modlists.js      合集文件读写
     config.js        应用到 config_player.xml
+    saves.js         解析 .save，读出「这个存档当时启用了哪些 mod」
     steam.js         工坊封面（公开接口 + 缓存）
     categories.js    分类规则与标签持久化
     relations.js     mod 之间的关联（前置需求）
@@ -353,6 +395,7 @@ pnpm exec electron scripts/smoke-app.cjs     # 端到端（真实目录，只读
 pnpm exec electron scripts/shots.cjs         # 界面截图 + 滚动/交互校验
 pnpm exec electron scripts/test-desc-scroll.cjs  # 工坊描述能否真的滚（发真实滚轮事件）
 pnpm exec electron scripts/test-apply-ui.cjs     # 「应用到游戏」点一次界面就更新（隔离临时目录）
+pnpm exec electron scripts/test-saves-ui.cjs     # 存档页：解析、对应合集、两个动作（隔离临时存档）
 ```
 
 `test-apply-ui.cjs` 是为了用户反馈的那个坑留下的：**点一次「应用到游戏」，config 确实写进去了，
@@ -364,6 +407,11 @@ IPC，断言「点击前 0 个『当前应用』徽章 → 点一次后立刻 1 
 「scrollHeight > clientHeight」这种静态条件会误判成"能滚"。必须用
 `webContents.sendInputEvent` 发**真实滚轮事件**，并确认滚轮坐标落在
 「描述区 ∩ 弹窗可见区」的交集里 —— 否则事件会打在标题栏上，测出假的"滚不动"。
+
+`test-saves-ui.cjs` 用**临时存档目录**（gzip 出来的假 `.save`，结构与真实的一致）+ 隔离
+`userData` 跑真实 IPC，覆盖：gzip + UTF-16LE 前缀的解析、`savepath` 为空/相对/绝对三种情形、
+「完全一致」与「完全覆盖」的判定、多出来的 mod 要按**真名**列出、「存为新合集」在名字被占用时
+自动改名（绝不覆盖已有合集）、「按存档启用」真的写进了 config。
 
 `test-backend.cjs` 覆盖了 `filelist.xml` 解析（含单引号、老格式 `version` 属性、BOM、
 以及 `modversion` 被 `gameversion` 误匹配的经典坑）、版本比较、合集往返、

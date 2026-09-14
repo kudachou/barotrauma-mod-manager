@@ -395,7 +395,9 @@ app.whenReady().then(async () => {
   await win.webContents.executeJavaScript(`document.querySelector('.lib-scroll').scrollTop = 0`);
   await sleep(300);
 
-  await win.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[1].click()`);
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('合集')).click()`
+  );
   await sleep(900);
   await shot(win, '02-collections');
 
@@ -454,11 +456,15 @@ app.whenReady().then(async () => {
   );
   await shot(win, '17-applied');
 
-  await win.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[2].click()`);
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('设置')).click()`
+  );
   await sleep(800);
   await shot(win, '03-settings');
 
-  await win.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[0].click()`);
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('Mod')).click()`
+  );
   await sleep(600);
   // 详情页测试要验证「历史版本」和「删除本地 mod」——这两块只有本地 mod 才有，
   // 所以必须明确挑一张本地卡（不能退回 cards[0]，那可能是工坊 mod）
@@ -754,6 +760,35 @@ app.whenReady().then(async () => {
         })()`)
       )
   );
+
+  /* ------------------------------ 存档页 ------------------------------ */
+  // 先关掉上面留下来的工坊详情弹窗（点遮罩关闭），否则截图会被它盖住
+  await win.webContents.executeJavaScript(`(() => {
+    const ov = document.querySelector('.overlay');
+    if (ov) ov.click();
+    return !!ov;
+  })()`);
+  await sleep(500);
+  // 预览模式（无 preload）下走 api.ts 里的示例存档
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('存档')).click()`
+  );
+  await sleep(1200);
+  console.log(
+    'saves=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => ({
+          rows: Array.from(document.querySelectorAll('.list-row')).map((r) => r.textContent.replace(/\\s+/g,' ').trim()),
+          badges: Array.from(document.querySelectorAll('.list-row .badge')).map((b) => b.textContent.trim()),
+          detail: (document.querySelector('.editor') || {}).textContent
+            ? document.querySelector('.editor').textContent.replace(/\\s+/g,' ').trim().slice(0, 200)
+            : null,
+          modRows: document.querySelectorAll('.editor .mod-row').length,
+          buttons: Array.from(document.querySelectorAll('.editor-head button')).map((b) => b.textContent.trim())
+        }))()`)
+      )
+  );
+  await shot(win, '20-saves');
 
   console.log('ERRORS ' + JSON.stringify(errors, null, 1));
   app.exit(0);

@@ -16,7 +16,8 @@ import type {
   WorkshopDetails,
   ModInfo,
   AppliedInfo,
-  WorkshopCheckRefresh
+  WorkshopCheckRefresh,
+  SaveList
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -243,6 +244,74 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       missing: [],
       count: 0,
       prunedBackups: []
+    };
+  },
+
+  // 预览模式：拿示例合集编两个存档出来，好把界面撑起来
+  listSaves: async (): Promise<SaveList> => {
+    const resolve = (e: ModlistEntry) => {
+      const m =
+        e.type === 'workshop'
+          ? state.mods.find((x) => x.source === 'workshop' && x.id === e.id)
+          : state.mods.find((x) => x.source === 'local' && x.id === e.name);
+      return m ? { source: m.source, id: m.id, name: m.name } : null;
+    };
+    const entriesOf = (i: number) => state.modlists[i]?.entries || [];
+    const first = state.modlists[0];
+    const second = state.modlists[1];
+    const subset = entriesOf(1).slice(0, 2);
+
+    return {
+      saveDir: '（预览模式）%LOCALAPPDATA%\\Daedalic Entertainment GmbH\\Barotrauma',
+      dirs: [
+        { dir: '（预览模式）', source: 'single', exists: true },
+        { dir: '（预览模式）\\Multiplayer', source: 'multi', exists: false }
+      ],
+      modlistCount: state.modlists.length,
+      saves: [
+        {
+          file: '示例存档.save',
+          path: '（预览模式）\\示例存档.save',
+          name: '示例存档',
+          source: 'single',
+          size: 253605,
+          saveTime: Date.now() - 3600_000,
+          submarine: 'Helena-海伦娜-无模组自行大改',
+          gameVersion: '1.13.4.0',
+          isMultiplayer: false,
+          mods: entriesOf(0).map((e) => ({ name: e.name || e.id || '', mod: resolve(e) })),
+          missingCount: 0,
+          match: first ? { fileName: first.fileName, name: first.name } : null,
+          covers: [],
+          coversTotal: first ? 1 : 0
+        },
+        {
+          file: '示例存档 2.save',
+          path: '（预览模式）\\示例存档 2.save',
+          name: '示例存档 2',
+          source: 'single',
+          size: 195624,
+          saveTime: Date.now() - 86400_000,
+          submarine: '儒艮2',
+          gameVersion: '1.13.4.0',
+          isMultiplayer: false,
+          mods: subset.map((e) => ({ name: e.name || e.id || '', mod: resolve(e) })),
+          missingCount: 1,
+          match: null,
+          covers: second
+            ? [
+                {
+                  fileName: second.fileName,
+                  name: second.name,
+                  extra: entriesOf(1)
+                    .slice(2)
+                    .map((e) => e.name || e.id || '')
+                }
+              ]
+            : [],
+          coversTotal: second ? 1 : 0
+        }
+      ]
     };
   },
 

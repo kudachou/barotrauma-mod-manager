@@ -736,6 +736,183 @@ try {
     '跳过的会带明确原因'
   );
   ok(dSkip.items.some((i) => i.id === '5003'), '还没备份的照常处理');
+
+  /* --------------------- 12. 存档解析与「对应合集」判定 --------------------- */
+  console.log('\n[12] 存档解析与「对应合集」判定');
+
+  const sv = require('../electron/services/saves');
+  const zlib = require('node:zlib');
+
+  // 造一个跟真实存档同构的 .save：gzip 里面先有一段 UTF-16LE 文件名，再是 XML
+  function writeSave(dir, file, names, attrs = {}) {
+    fs.mkdirSync(dir, { recursive: true });
+    const a = {
+      savetime: '1789363813',
+      submarine: '测试潜艇',
+      version: '1.13.4.0',
+      ismultiplayer: 'false',
+      ...attrs
+    };
+    const xml =
+      '<?xml version="1.0" encoding="utf-8"?>\n' +
+      `<Gamesession ${Object.entries(a)
+        .map(([k, v]) => `${k}="${v}"`)
+        .join(' ')} selectedcontentpackagenames="${names.join('|')}">\n` +
+      '  <ownedsubmarines><sub name="测试潜艇" /></ownedsubmarines>\n' +
+      '</Gamesession>\n';
+    // 前面那截 UTF-16LE 的 "gamesession.xml" 是真实存档的特征，解析必须能跳过它
+    const prefix = Buffer.from('gamesession.xml', 'utf16le');
+    const body = Buffer.concat([prefix, Buffer.from(xml, 'utf8')]);
+    fs.writeFileSync(path.join(dir, file), zlib.gzipSync(body));
+  }
+
+  const svRoot = path.join(TMP, 'saves');
+  const svSingle = svRoot;
+  const svMulti = path.join(svRoot, 'Multiplayer');
+  const svLocal = path.join(TMP, 'sv-mods', 'LocalMods');
+  const svSteam = path.join(TMP, 'sv-mods', 'workshop');
+  const svInst = path.join(TMP, 'sv-mods', 'Installed');
+  const svLists = path.join(TMP, 'sv-mods', 'ModLists');
+
+  const svMods = [];
+  for (const [root, id, name] of [
+    [svSteam, '7001', 'Amod'],
+    [svSteam, '7002', 'Bmod'],
+    [svSteam, '7003', 'Cmod'],
+    [svInst, '7001', 'Amod'],
+    [svInst, '7002', 'Bmod'],
+    [svInst, '7003', 'Cmod']
+  ]) {
+    writeMod(root, id, `<contentpackage name="${name}" modversion="1.0" steamworkshopid="${id}" />`);
+    svMods.push({ source: 'workshop', id, name });
+  }
+  // 本地 mod：文件夹名跟 contentpackage 名故意不一样，验证"要按真名比"
+  writeMod(svLocal, 'my-folder', '<contentpackage name="Lmod" modversion="1.0" />');
+  svMods.push({ source: 'local', id: 'my-folder', name: 'Lmod' });
+
+  modlists.saveModlist(svLists, '全套.xml', '全套', [
+    { type: 'workshop', name: 'Amod', id: '7001' },
+    { type: 'workshop', name: 'Bmod', id: '7002' },
+    { type: 'workshop', name: 'Cmod', id: '7003' },
+    { type: 'local', name: 'my-folder' }
+  ]);
+  modlists.saveModlist(svLists, '只有A.xml', '只有A', [
+    { type: 'workshop', name: 'Amod', id: '7001' }
+  ]);
+
+  writeSave(svSingle, '完全一致.save', ['Vanilla', 'Amod', 'Bmod', 'Cmod', 'Lmod']);
+  writeSave(svSingle, '被覆盖.save', ['Vanilla', 'Amod', 'Bmod']);
+  writeSave(svSingle, '没得覆盖.save', ['Vanilla', 'Amod', 'Bmod', 'Cmod', 'Lmod', 'Dmod']);
+  writeSave(svMulti, '多人.save', ['Vanilla', 'Amod'], {
+    ismultiplayer: 'true',
+    submarine: 'Azimuth'
+  });
+  // 不是 gzip 的存档也要能读（当未压缩 XML 处理）
+  fs.mkdirSync(svSingle, { recursive: true });
+  fs.writeFileSync(
+    path.join(svSingle, '未压缩.save'),
+    '<?xml version="1.0" encoding="utf-8"?><Gamesession version="1.0" selectedcontentpackagenames="Vanilla|Amod" />',
+    'utf8'
+  );
+  // 垃圾文件：列存档时应该被忽略
+  fs.writeFileSync(path.join(svSingle, '坏掉的.save'), 'not a save', 'utf8');
+  fs.writeFileSync(path.join(svSingle, '无关文件.txt'), 'x', 'utf8');
+
+  const svSettings = {
+    gameDir: path.join(TMP, 'sv-mods'),
+    configPlayerPath: path.join(TMP, 'sv-mods', 'config_player.xml'),
+    modListsDir: svLists,
+    localModsDir: svLocal,
+    workshopModsDir: svSteam,
+    installedWorkshopDir: svInst
+  };
+
+  const one = sv.parseSave(path.join(svSingle, '完全一致.save'));
+  ok(!!one, '能解析 gzip 存档（含 UTF-16LE 前缀）');
+  ok(one && one.mods.length === 4 && one.mods[0] === 'Amod', '读出的 mod 列表正确且不含 Vanilla');
+  ok(one && one.submarine === '测试潜艇', '读出潜艇名');
+  ok(one && one.gameVersion === '1.13.4.0', '读出游戏版本');
+  ok(one && one.saveTime === 1789363813000, 'savetime 转成毫秒');
+  ok(one && one.isMultiplayer === false, 'ismultiplayer=false 解析正确');
+
+  // 存档目录：savepath 为空 → 用默认位置（靠 LOCALAPPDATA 定位）
+  const oldLocal = process.env.LOCALAPPDATA;
+  process.env.LOCALAPPDATA = path.join(TMP, 'fake-local');
+  fs.mkdirSync(path.join(TMP, 'fake-local', 'Daedalic Entertainment GmbH', 'Barotrauma'), {
+    recursive: true
+  });
+  const defDir = sv.saveDirOf({ ...svSettings, configPlayerPath: '' });
+  ok(
+    defDir === path.join(TMP, 'fake-local', 'Daedalic Entertainment GmbH', 'Barotrauma'),
+    'savepath 为空时用默认存档目录'
+  );
+  process.env.LOCALAPPDATA = oldLocal;
+
+  // savepath 有值 → 以它为准，哪怕目录不存在也不许回退（否则会假装"没有存档"）
+  fs.writeFileSync(
+    svSettings.configPlayerPath,
+    '<?xml version="1.0" encoding="utf-8"?>\n<config language="x" savepath="mySaves">\n' +
+      '  <contentpackages><corepackage path="Content/ContentPackages/Vanilla.xml" /></contentpackages>\n</config>\n',
+    'utf8'
+  );
+  ok(sv.savePathSetting(svSettings) === 'mySaves', '读得出 config 里的 savepath');
+  ok(
+    sv.saveDirOf(svSettings) === path.resolve(svSettings.gameDir, 'mySaves'),
+    'savepath 是相对路径时按游戏目录解析'
+  );
+  ok(
+    sv.saveDirOf(svSettings) !== path.join(oldLocal, 'Daedalic Entertainment GmbH', 'Barotrauma'),
+    'savepath 指向不存在的目录时也不回退到默认位置'
+  );
+  fs.writeFileSync(
+    svSettings.configPlayerPath,
+    `<?xml version="1.0" encoding="utf-8"?>\n<config savepath="${svRoot}" />\n`,
+    'utf8'
+  );
+  ok(sv.saveDirOf(svSettings) === svRoot, 'savepath 是绝对路径时直接用它');
+
+  const r12 = sv.listSaves(svSettings, svMods);
+  const byName = (n) => r12.saves.find((s) => s.name === n);
+  ok(r12.saves.length === 5, `列出 5 个能认的存档（忽略坏文件和非 .save）— 实际 ${r12.saves.length}`);
+  ok(
+    !r12.saves.some((s) => s.name === '坏掉的'),
+    '坏掉的 .save 不会被误列出来'
+  );
+  ok(!!byName('未压缩'), '未压缩的存档也能读');
+
+  const exactSave = byName('完全一致');
+  ok(!!exactSave && !!exactSave.match && exactSave.match.name === '全套', '完全一致时指出对应合集');
+  ok(!!exactSave && exactSave.covers.length === 0, '已经完全一致就不再列「覆盖」的合集');
+
+  const coverSave = byName('被覆盖');
+  ok(coverSave && !coverSave.match, '只被覆盖时不算「完全一致」');
+  ok(
+    coverSave && coverSave.covers.length === 1 && coverSave.covers[0].name === '全套',
+    '被覆盖时指出是哪个合集'
+  );
+  ok(
+    coverSave && coverSave.covers[0].extra.join(',') === 'Cmod,Lmod',
+    `列出合集里多出来的 mod，且用 mod 真名而不是文件夹名（实际 ${coverSave && coverSave.covers[0].extra.join(',')}）`
+  );
+
+  const noSave = byName('没得覆盖');
+  ok(noSave && !noSave.match && noSave.covers.length === 0, '没有任何合集能覆盖时如实为空');
+  ok(noSave && noSave.missingCount === 1, '数出「游戏里没有」的 mod 个数');
+  ok(
+    noSave && noSave.mods.find((m) => m.name === 'Dmod').mod === null,
+    '找不到的 mod 标记为 null（界面靠它显示「游戏里没有」）'
+  );
+  ok(
+    noSave && !!noSave.mods.find((m) => m.name === 'Lmod').mod,
+    '本地 mod 按 contentpackage 真名（而不是文件夹名）匹配上'
+  );
+
+  const multiSave = byName('多人');
+  ok(multiSave && multiSave.source === 'multi', 'Multiplayer 目录下的标为多人存档');
+  ok(
+    r12.saves.indexOf(byName('未压缩')) >= 0 && r12.saves[0].saveTime >= r12.saves[r12.saves.length - 1].saveTime,
+    '按存档时间从新到旧排序'
+  );
 } catch (e) {
   console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
   failures++;

@@ -21,6 +21,7 @@ const {
   xmlEscape
 } = require('./modlists');
 const { applyToGame, readAppliedPackages } = require('./config');
+const { listSaves } = require('./saves');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -343,6 +344,22 @@ function registerIpc() {
       count: r.count,
       prunedBackups: r.prunedBackups || []
     };
+  });
+
+  /* -------------------------------- 存档 -------------------------------- */
+
+  /**
+   * 列存档。刻意**不放进 scan** —— 解析每个存档都要 gunzip 几百 KB，
+   * 没必要每次扫描 mod 目录都做一遍；存档页打开时才读。
+   */
+  ipcMain.handle('saves:list', () => {
+    const s = getSettings();
+    const mods = [
+      ...scanDir('workshop', s.workshopModsDir),
+      ...scanDir('workshop', s.installedWorkshopDir),
+      ...scanDir('local', s.localModsDir)
+    ];
+    return listSaves(s, mods);
   });
 
   /* ------------------------------- 封面 -------------------------------- */

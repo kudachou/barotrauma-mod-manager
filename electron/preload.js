@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('api', {
   removeModFromModlist: (fileName, entry) => invoke('modlist:removeMod', fileName, entry),
   applyModlist: (name, entries) => invoke('modlist:apply', name, entries),
 
+  // 存档：读出每个存档当时启用了哪些 mod
+  listSaves: () => invoke('saves:list'),
+
   // previews
   fetchPreviews: (ids) => invoke('previews:fetch', ids),
   onPreviewReady: (cb) => {

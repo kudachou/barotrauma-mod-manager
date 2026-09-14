@@ -103,8 +103,10 @@ app.whenReady().then(async () => {
   await sleep(500);
   await shot(win, '11-real-library-scrolled');
 
-  // 合集页：真实合集
-  await win.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[1].click()`);
+  // 合集页：真实合集（按文字点导航，别用下标 —— 导航项数量会变）
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('合集')).click()`
+  );
   await sleep(1200);
   console.log(
     '合集页: ' +
@@ -120,8 +122,30 @@ app.whenReady().then(async () => {
   );
   await shot(win, '12-real-collections');
 
+  // 存档页：真实存档（只读；解析的是真实 .save，但一个字节都不改）
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('存档')).click()`
+  );
+  await sleep(2500);
+  console.log(
+    '存档页: ' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => ({
+          rows: Array.from(document.querySelectorAll('.list-row')).map((r) =>
+            r.textContent.replace(/\\s+/g, ' ').trim()
+          ),
+          saveDir: (document.querySelector('.list-foot') || {}).textContent || null,
+          detailMods: document.querySelectorAll('.editor .mod-row').length,
+          buttons: Array.from(document.querySelectorAll('.editor-head button')).map((b) => b.textContent.trim())
+        }))()`)
+      )
+  );
+  await shot(win, '21-real-saves');
+
   // 设置页：真实路径校验
-  await win.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[2].click()`);
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('设置')).click()`
+  );
   await sleep(1400);
   console.log(
     '设置页: ' +

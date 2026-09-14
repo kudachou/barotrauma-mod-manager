@@ -126,7 +126,53 @@ export interface ScanResult {
   checksCheckedAt?: number;
 }
 
-export type ViewKey = 'library' | 'collections' | 'settings';
+export type ViewKey = 'library' | 'collections' | 'saves' | 'settings';
+
+/* --------------------------------- 存档 --------------------------------- */
+
+/** 存档里记录的一个 mod（存档只有名字，靠名字反查当前装着的 mod） */
+export interface SaveModEntry {
+  name: string;
+  /** null = 当前 mod 目录里找不到它（作者删了、或改过名） */
+  mod: { source: 'workshop' | 'local'; id: string; name: string } | null;
+}
+
+/** 能完全覆盖某个存档的合集 */
+export interface SaveCover {
+  fileName: string;
+  name: string;
+  /** 合集里有、但存档没记录的 mod 名 */
+  extra: string[];
+}
+
+export interface SaveInfo {
+  file: string;
+  path: string;
+  name: string;
+  source: 'single' | 'multi';
+  size: number;
+  /** 存档时间（毫秒） */
+  saveTime: number;
+  submarine: string | null;
+  gameVersion: string | null;
+  isMultiplayer: boolean;
+  /** 按加载顺序 */
+  mods: SaveModEntry[];
+  /** 游戏里已经找不到的 mod 个数 */
+  missingCount: number;
+  /** 与某个合集完全一致 */
+  match: { fileName: string; name: string } | null;
+  /** 能完全覆盖存档的合集（按"多出来的最少"排序，最多 3 个） */
+  covers: SaveCover[];
+  coversTotal: number;
+}
+
+export interface SaveList {
+  saveDir: string;
+  dirs: { dir: string; source: 'single' | 'multi'; exists: boolean }[];
+  modlistCount: number;
+  saves: SaveInfo[];
+}
 
 /** 更新状态 */
 export type UpdateStatus =
