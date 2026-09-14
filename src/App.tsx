@@ -230,6 +230,25 @@ export default function App() {
   const syncPending = (data?.workshopSync?.items || []).filter(
     (i) => i.reason !== 'downloading' && i.reason !== 'delisted'
   ).length;
+  /**
+   * 已下架、因而不参与同步的数量。
+   * 要单独显示出来 —— 否则「待同步」从 N 变成 0 时用户会以为是游戏自己更新了，
+   * 实际上只是这些条目被重新归类了。
+   */
+  const syncDelisted = (data?.workshopSync?.items || []).filter(
+    (i) => i.reason === 'delisted'
+  ).length;
+  const syncBlocked = (data?.workshopSync?.items || []).filter(
+    (i) => i.reason === 'downloading'
+  ).length;
+  const syncTitle = [
+    '把工坊更新搬进游戏的 WorkshopMods\\Installed，不用启动游戏',
+    syncPending > 0 ? `有 ${syncPending} 个可以同步` : '没有需要同步的',
+    syncDelisted > 0 ? `${syncDelisted} 个已下架（工坊上已经没了，不参与同步）` : null,
+    syncBlocked > 0 ? `${syncBlocked} 个 Steam 还没下载完` : null
+  ]
+    .filter(Boolean)
+    .join('；');
 
   const allCategories = useMemo(() => {
     const removed = categories.removed || [];
@@ -445,12 +464,15 @@ export default function App() {
           </div>
           <span className="spacer" />
           <button
-            className={`btn ${syncPending > 0 ? 'attention' : ''}`}
+            className={`btn ${syncPending > 0 || syncDelisted > 0 ? 'attention' : ''}`}
             onClick={() => setSyncOpen(true)}
-            title="把工坊更新搬进游戏的 WorkshopMods\Installed，不用启动游戏"
+            title={syncTitle}
           >
             <IconDownload size={15} />
             同步到游戏{syncPending > 0 ? ` ${syncPending}` : ''}
+            {syncPending === 0 && syncDelisted > 0 && (
+              <span className="btn-sub">{syncDelisted} 已下架</span>
+            )}
           </button>
           <button
             className="btn"
