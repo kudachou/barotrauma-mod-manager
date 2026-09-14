@@ -518,18 +518,18 @@ try {
   const apNoBlock = readAppliedPackages({ configPlayerPath: cfgNoBlock });
   ok(!apNoBlock.available && !!apNoBlock.reason, '没有 contentpackages 段时给出原因');
 
-  /* ------------------ 10. 同步工坊更新到游戏 ------------------ */
 
-  console.log('\n[10] 同步工坊更新到游戏');
+  /* ------------------ 10. 读 Steam 的工坊状态文件（.acf） ------------------ */
+
+  console.log('\n[10] Steam 工坊状态文件（.acf）');
 
   const ws = require('../electron/services/workshopsync');
-  const syncRoot = path.join(TMP, 'sync');
-  const steamDir = path.join(syncRoot, 'steam', 'workshop', 'content', '602960');
-  const instDir = path.join(syncRoot, 'inst', 'Installed');
-  const syncSettings = { workshopModsDir: steamDir, installedWorkshopDir: instDir };
-
+  const acfRoot = path.join(TMP, 'acf');
+  const acfSteam = path.join(acfRoot, 'steam', 'workshop', 'content', '602960');
+  const acfInst = path.join(acfRoot, 'inst', 'Installed');
   const T_OLD = 1700000000;
   const T_NEW = 1700100000;
+  const A = '1111111111';
 
   const writeFl = (dir, name, id, ver) => {
     fs.mkdirSync(dir, { recursive: true });
@@ -540,32 +540,10 @@ try {
       'utf8'
     );
   };
+  writeFl(path.join(acfSteam, A), '甲mod', A, '2.0');
+  writeFl(path.join(acfInst, A), '甲mod', A, '1.0');
 
-  // 甲：工坊有新版、Steam 已下完，游戏里是旧的
-  const A = '1111111111';
-  writeFl(path.join(steamDir, A), '甲mod', A, '2.0');
-  fs.writeFileSync(path.join(steamDir, A, 'new.txt'), '新内容', 'utf8');
-  writeFl(path.join(instDir, A), '甲mod', A, '1.0');
-  fs.writeFileSync(path.join(instDir, A, 'stale.txt'), '旧内容', 'utf8');
-  ws.stampFilelist(path.join(instDir, A, 'filelist.xml'), T_OLD);
-
-  // 乙：工坊有新版但 Steam 还没下完（latest != timeupdated）
-  const B = '2222222222';
-  writeFl(path.join(steamDir, B), '乙mod', B, '2.0');
-  writeFl(path.join(instDir, B), '乙mod', B, '1.0');
-  ws.stampFilelist(path.join(instDir, B, 'filelist.xml'), T_OLD);
-
-  // 丙：已订阅但 Installed 里还没有
-  const C = '3333333333';
-  writeFl(path.join(steamDir, C), '丙mod', C, '1.0');
-
-  // 丁：已经是最新的，不该出现在计划里
-  const D = '4444444444';
-  writeFl(path.join(steamDir, D), '丁mod', D, '1.0');
-  writeFl(path.join(instDir, D), '丁mod', D, '1.0');
-  ws.stampFilelist(path.join(instDir, D, 'filelist.xml'), T_NEW);
-
-  const acfFile = path.join(syncRoot, 'steam', 'workshop', 'appworkshop_602960.acf');
+  const acfFile = path.join(acfRoot, 'steam', 'workshop', 'appworkshop_602960.acf');
   fs.writeFileSync(
     acfFile,
     [
@@ -574,60 +552,34 @@ try {
       '\t"appid"\t\t"602960"',
       '\t"WorkshopItemDetails"',
       '\t{',
-      `\t\t"${A}"\n\t\t{\n\t\t\t"manifest"\t\t"2"\n\t\t\t"timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_manifest"\t\t"2"\n\t\t}`,
-      `\t\t"${B}"\n\t\t{\n\t\t\t"manifest"\t\t"1"\n\t\t\t"timeupdated"\t\t"${T_OLD}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t}`,
-      `\t\t"${C}"\n\t\t{\n\t\t\t"timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t}`,
-      `\t\t"${D}"\n\t\t{\n\t\t\t"timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t}`,
+      `\t\t"${A}"\n\t\t{\n\t\t\t"manifest"\t\t"2"\n\t\t\t"timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t}`,
       '\t}',
       '}'
     ].join('\n'),
     'utf8'
   );
 
-  ok(ws.acfPath(steamDir) === acfFile, '能从 workshop 目录推出 appworkshop_*.acf 的路径');
-  ok(ws.installTimeOf(path.join(instDir, A)) === T_OLD, '读得出游戏写入的 installtime');
+  ok(ws.acfPath(acfSteam) === acfFile, '能从 workshop 目录推出 appworkshop_*.acf 的路径');
 
-  const syncPlan = ws.planWorkshopSync(syncSettings);
-  ok(syncPlan.available, '.acf 读得到');
-  ok(syncPlan.items.length === 3, `计划里有 ${syncPlan.items.length} 个（已最新的不算）`);
-  const byId = new Map(syncPlan.items.map((i) => [i.id, i]));
-  ok(byId.get(A)?.reason === 'update', '甲判为「工坊有新版」');
-  ok(byId.get(B)?.reason === 'downloading', '乙判为「Steam 下载中」');
-  ok(byId.get(C)?.reason === 'missing', '丙判为「还没装进游戏」');
-  ok(!byId.has(D), '丁已是最新，不列入计划');
+  const acfRead = ws.readWorkshopAcf(acfSteam);
+  ok(acfRead.available, '.acf 读得到');
+  ok(acfRead.items[A]?.timeUpdated === T_NEW, '读得出 timeupdated（Steam 本地那份的版本）');
+  ok(acfRead.items[A]?.latestTimeUpdated === T_NEW, '读得出 latest_timeupdated（工坊最新版本）');
 
-  const runnable = syncPlan.items.filter((i) => i.reason !== 'downloading');
-  const res = ws.runWorkshopSync(syncSettings, runnable);
-  ok(res.done === 2 && res.errors.length === 0, `同步完成 ${res.done} 个，无错误`);
-
-  const aFl = fs.readFileSync(path.join(instDir, A, 'filelist.xml'), 'utf8');
-  ok(fs.existsSync(path.join(instDir, A, 'new.txt')), '甲：新文件复制过去了');
-  ok(!fs.existsSync(path.join(instDir, A, 'stale.txt')), '甲：源里已没有的旧文件被删掉');
-  ok(aFl.includes(`installtime="${T_NEW}"`), '甲：installtime 被写成最新版本的时间戳');
-  ok(aFl.includes('modversion="2.0"'), '甲：modversion 来自工坊的新 filelist');
-  ok(/corepackage="false"/.test(aFl) && !/corepackage="False"/.test(aFl), '甲：corepackage 按游戏写法改成小写');
-  ok(
-    aFl.indexOf('steamworkshopid') < aFl.indexOf('corepackage') &&
-      aFl.indexOf('installtime') < aFl.indexOf('expectedhash'),
-    '甲：属性顺序照游戏的写法（steamworkshopid 提前、installtime 在 expectedhash 前）'
-  );
-
-  ok(fs.existsSync(path.join(instDir, C, 'filelist.xml')), '丙：整份装进了 Installed');
-  ok(
-    fs.readFileSync(path.join(instDir, C, 'filelist.xml'), 'utf8').includes(`installtime="${T_NEW}"`),
-    '丙：也写了 installtime'
-  );
-  ok(
-    !fs.existsSync(path.join(instDir, B, 'new.txt')) &&
-      fs.readFileSync(path.join(instDir, B, 'filelist.xml'), 'utf8').includes(`installtime="${T_OLD}"`),
-    '乙（Steam 下载中）完全没被碰'
-  );
-
-  const syncPlan2 = ws.planWorkshopSync(syncSettings);
-  ok(syncPlan2.items.length === 1 && syncPlan2.items[0].id === B, '再规划一次，只剩「下载中」的乙');
-
-  const noAcf = ws.readWorkshopAcf(path.join(syncRoot, 'nowhere'));
+  const noAcf = ws.readWorkshopAcf(path.join(acfRoot, 'nowhere'));
   ok(!noAcf.available && !!noAcf.reason, '.acf 找不到时安全返回而不是抛错');
+
+  // installtime：游戏复制进 Installed 时写的，用来判断游戏里那份是不是旧的
+  const flA = path.join(acfInst, A, 'filelist.xml');
+  fs.writeFileSync(
+    flA,
+    fs
+      .readFileSync(flA, 'utf8')
+      .replace(/<contentpackage\b([^>]*)>/, `<contentpackage$1 installtime="${T_OLD}">`),
+    'utf8'
+  );
+  ok(ws.installTimeOf(path.join(acfInst, A)) === T_OLD, '读得出游戏写入的 installtime');
+  ok(ws.installTimeOf(path.join(acfRoot, 'nowhere')) === null, '目录不存在时返回 null 而不是抛错');
 
   /* ------------------ 11. 下架标记与「只备份已下架的」 ------------------ */
 

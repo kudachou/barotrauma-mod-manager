@@ -78,14 +78,6 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('backup:progress', (_e, progress) => cb(progress));
   },
 
-  // 同步工坊更新到游戏（不用启动游戏就能让更新生效）
-  planWorkshopSync: () => invoke('workshopsync:plan'),
-  startWorkshopSync: () => invoke('workshopsync:start'),
-  cancelWorkshopSync: () => invoke('workshopsync:cancel'),
-  onWorkshopSyncProgress: (cb) => {
-    ipcRenderer.on('workshopsync:progress', (_e, progress) => cb(progress));
-  },
-
   // 更新
   updaterStatus: () => invoke('updater:status'),
   updaterCheck: () => invoke('updater:check'),

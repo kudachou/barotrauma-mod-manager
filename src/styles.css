@@ -1720,27 +1720,6 @@ select.input option {
   color: var(--text);
 }
 
-/* 有待处理事项时的强调按钮（比如有工坊更新还没同步进游戏） */
-.btn.attention {
-  background: rgba(251, 191, 36, 0.14);
-  border-color: rgba(251, 191, 36, 0.42);
-  color: #fcd34d;
-}
-
-/* 按钮里的小字补充（如「2 已下架」） */
-.btn-sub {
-  font-size: 11px;
-  opacity: 0.75;
-  margin-left: 6px;
-  padding-left: 6px;
-  border-left: 1px solid currentColor;
-}
-
-.btn.attention:hover:not(:disabled) {
-  background: rgba(251, 191, 36, 0.22);
-  border-color: rgba(251, 191, 36, 0.6);
-}
-
 /* 已下架（作者从工坊撤掉了，本地这份是唯一的） */
 .badge.st-delisted {
   background: rgba(251, 113, 133, 0.18);

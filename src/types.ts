@@ -103,44 +103,6 @@ export interface AppliedInfo {
   missing: string[];
 }
 
-/** 待同步到游戏的工坊 mod */
-export interface WorkshopSyncItem {
-  id: string;
-  name: string;
-  /**
-   * update      = 工坊有新版、Steam 已下好，游戏里还是旧的
-   * downloading = 工坊有新版但 Steam 还没下完（这时不能同步）
-   * missing     = 已订阅但 Installed 里还没有
-   * delisted    = 已被作者下架（工坊上没有了，不能同步，只能备份）
-   */
-  reason: 'update' | 'downloading' | 'missing' | 'delisted';
-  /** 游戏里那份的 installtime */
-  installedTime: number | null;
-  latestTime: number | null;
-}
-
-/** 「工坊更新 vs 游戏里的副本」的状态 */
-export interface WorkshopSyncInfo {
-  available: boolean;
-  acfPath: string | null;
-  reason: string | null;
-  items: WorkshopSyncItem[];
-}
-
-export interface WorkshopSyncProgress {
-  phase: 'copying' | 'done';
-  done: number;
-  total: number;
-  current?: string | null;
-  errors?: number;
-}
-
-export interface WorkshopSyncResult {
-  done: number;
-  total: number;
-  errors: { id: string; name: string; message: string }[];
-}
-
 export interface ScanResult {
   mods: ModInfo[];
   modlists: ModlistSummary[];
@@ -152,8 +114,6 @@ export interface ScanResult {
   applied: AppliedInfo;
   /** `${source}:${id}` -> 关联的 mod 标识（一般是前置需求） */
   relations: Record<string, string[]>;
-  /** 工坊更新与游戏副本的差异 */
-  workshopSync: WorkshopSyncInfo;
   /** 「工坊条目还在不在」的缓存太旧，界面该去刷一次 */
   checksStale?: boolean;
   /** 已核实为下架的条目数 */

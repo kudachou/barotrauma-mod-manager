@@ -261,6 +261,26 @@ ERROR: Cannot create symbolic link … 客户端没有所需的特权。
 没填 Key 时逐个抓网页，只能把「看不到」标成「工坊不可见」，不敢断言已下架。
 结果缓存在 `userData/workshop-checks.json`，扫描时读缓存不联网；核实不出来的会退避重试。
 
+### 为什么不做一个「把工坊更新同步进游戏」的功能
+
+曾经做过，后来移除了。原因是实测发现**那个中间态根本不存在**：
+
+Steam 把订阅的 mod 下载到 `steamapps\workshop\content\<appid>\<id>`，
+而游戏加载的是自己的 `…\Barotrauma\WorkshopMods\Installed\<id>`（它会写一个 `installtime`）。
+看起来像是「Steam 下好了、游戏还没复制」有个空档可以帮忙 —— 但实测：
+
+```
+工坊条目 3801589375 发布后
+  Steam 订阅目录： 13:35:40
+  Installed：      13:35:41     ← 相差 1 秒
+  .acf 的 timeupdated   = 1789392938
+  Installed installtime = 1789392938   ← 完全一致
+```
+
+**下载完 1 秒内游戏就自己复制过去了**，而且下载本身也是游戏触发的
+（游戏不在运行时，工坊更新只会躺在那里等着）。
+所以这个功能既插不进手，也会让人误以为管理器能管更新流程。
+
 ## 安全说明
 
 - **应用合集**：先备份再写，只动 `<contentpackages>` 段，段外逐字节不变，缺段则中止。

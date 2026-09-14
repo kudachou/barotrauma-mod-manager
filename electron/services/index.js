@@ -29,8 +29,6 @@ const {
   removeRelations
 } = require('./relations');
 const {
-  planWorkshopSync,
-  runWorkshopSync,
   readWorkshopAcf,
   installTimeOf,
   readChecks,
@@ -240,7 +238,6 @@ function scanAll() {
     warnings,
     applied,
     relations: getRelations(userDataDir()),
-    workshopSync: planWorkshopSync(s, checks),
     // 缓存太旧就让界面去刷一次（不阻塞扫描）
     checksStale: checksStale(checks, checkIds),
     /** 已核实为下架的数量 */
@@ -627,40 +624,6 @@ function registerIpc() {
 
   ipcMain.handle('backup:cancel', () => {
     backupCancelled = true;
-    return true;
-  });
-
-  /* ---------------------- 同步工坊更新到游戏 ---------------------- */
-
-  let syncRunning = false;
-  let syncCancelled = false;
-
-  ipcMain.handle('workshopsync:plan', () => planWorkshopSync(getSettings(), readChecks(userDataDir())));
-
-  ipcMain.handle('workshopsync:start', (event) => {
-    if (syncRunning) throw new Error('已有同步任务在进行中');
-    const s = getSettings();
-    const sender = event.sender;
-
-    syncRunning = true;
-    syncCancelled = false;
-    try {
-      const plan = planWorkshopSync(s, readChecks(userDataDir()));
-      // 'downloading'（Steam 没下完）和 'delisted'（工坊上已经没了）都不能搬
-      const runnable = plan.items.filter(
-        (i) => i.reason !== 'downloading' && i.reason !== 'delisted'
-      );
-      return runWorkshopSync(s, runnable, {
-        onProgress: (p) => send(sender, 'workshopsync:progress', p),
-        isCancelled: () => syncCancelled
-      });
-    } finally {
-      syncRunning = false;
-    }
-  });
-
-  ipcMain.handle('workshopsync:cancel', () => {
-    syncCancelled = true;
     return true;
   });
 

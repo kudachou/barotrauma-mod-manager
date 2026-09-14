@@ -3,25 +3,27 @@ const path = require('node:path');
 const https = require('node:https');
 
 const { stripBom } = require('./mods');
-const { escapeAttr } = require('./config');
 const { fetchDetails } = require('./steam');
 
 /**
- * 「工坊更新 → 游戏里的副本」这条链路。
+ * 工坊状态相关的两件事。
  *
- * 背景：Steam 把订阅的 mod 下载到 `steamapps/workshop/content/<appid>/<id>`，
- * 但游戏并不直接加载那里 —— 它启动时会把内容复制进自己的
- * `…\Daedalic Entertainment GmbH\Barotrauma\WorkshopMods\Installed\<id>`，
- * 并在 filelist.xml 里写一个 installtime 字段。
+ * 1) 读 Steam 的 `appworkshop_*.acf`（readWorkshopAcf / installTimeOf）
+ *    每个条目记着 timeupdated（本地已下载版本）和 latest_timeupdated（最新可用版本）。
+ *    游戏把 timeupdated 原样写进 Installed 的 filelist.xml 当 installtime ——
+ *    对着 100 个真实 mod 验证过，100/100 吻合。
  *
- * 这里挖到的关键事实（对着 100 个真实 mod 验证过，100/100 吻合）：
- *   installtime == Steam .acf 里该条目的 timeupdated
- * 也就是「我装的是哪个版本」。而 .acf 里还有 latest_timeupdated（最新可用版本），
- * 所以「游戏里的副本是不是旧了」是可以离线、确定性地算出来的：
- *   latest_timeupdated > installtime  →  旧了
+ * 2) 检查「这个工坊条目还在不在」（refreshChecks / isDelisted）
+ *    作者下架之后，本地文件看不出任何区别（.acf 记录和正常 mod 一模一样），只能联网核实。
+ *    结果缓存在 `userData/workshop-checks.json`，扫描时读缓存、不联网。
  *
- * 于是不用启动游戏也能把更新铺进去：复制内容 + 把 installtime 写成 latest_timeupdated。
- * 因为搬的是与官方一字不差的字节，内容哈希不变，不会触发 README 里警告的联机问题。
+ *    有 Steam Web API Key 时走官方 `IPublishedFileService/GetDetails`（准确且快，105 条约 1 秒）；
+ *    没有就退回抓工坊网页 —— 那种只能得出「工坊上看不到」，
+ *    因为网页分不清「已下架」和「作者设为私有」（实测真的会把私有条目误判成下架）。
+ *
+ * 注：曾经这里还有一个「把工坊更新同步进游戏 Installed」的功能，已移除。
+ *     实测发现游戏在 Steam 下载完之后会自己立刻复制进 Installed（相差 1 秒），
+ *     那个中间态在实际流程里根本不存在。
  */
 
 /** 找到 `steamapps/workshop/appworkshop_<appid>.acf` */
@@ -106,86 +108,6 @@ function installTimeOf(dir) {
     const txt = stripBom(fs.readFileSync(path.join(dir, 'filelist.xml'), 'utf8'));
     const m = txt.match(/\binstalltime\s*=\s*"(\d+)"/i);
     return m ? Number(m[1]) : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 算出哪些 mod 需要同步。
- * 三种情况：
- *   update      —— 工坊有新版且 Steam 已下好，游戏里还是旧的
- *   downloading —— 工坊有新版但 Steam 还没下完，这时不能同步（内容不完整）
- *   missing     —— 已订阅但 Installed 里还没有
- */
-function planWorkshopSync(settings, checks) {
-  const acf = readWorkshopAcf(settings.workshopModsDir);
-  const out = {
-    available: acf.available,
-    acfPath: acf.path,
-    reason: acf.reason,
-    items: []
-  };
-  if (!acf.available) return out;
-
-  for (const [id, d] of Object.entries(acf.items)) {
-    const srcDir = path.join(settings.workshopModsDir || '', id);
-    const dstDir = path.join(settings.installedWorkshopDir || '', id);
-    if (!fs.existsSync(path.join(srcDir, 'filelist.xml'))) continue; // 订阅目录里没有，管不了
-
-    const name = readName(srcDir) || `#${id}`;
-
-    // 已下架的条目不能同步（工坊上已经没有它了），单独列出来提示备份
-    if (isDelisted(checks, id)) {
-      out.items.push({
-        id,
-        name,
-        reason: 'delisted',
-        installedTime: installTimeOf(dstDir),
-        latestTime: d.latestTimeUpdated || d.timeUpdated
-      });
-      continue;
-    }
-
-    if (!fs.existsSync(path.join(dstDir, 'filelist.xml'))) {
-      out.items.push({
-        id,
-        name,
-        reason: 'missing',
-        installedTime: null,
-        latestTime: d.latestTimeUpdated || d.timeUpdated
-      });
-      continue;
-    }
-
-    // Steam 自己还没下完新版 → 现在同步会搬进不完整的内容
-    if (d.latestTimeUpdated && d.timeUpdated && d.latestTimeUpdated !== d.timeUpdated) {
-      out.items.push({
-        id,
-        name,
-        reason: 'downloading',
-        installedTime: installTimeOf(dstDir),
-        latestTime: d.latestTimeUpdated
-      });
-      continue;
-    }
-
-    const installed = installTimeOf(dstDir);
-    const latest = d.latestTimeUpdated || d.timeUpdated;
-    if (installed && latest && latest > installed) {
-      out.items.push({ id, name, reason: 'update', installedTime: installed, latestTime: latest });
-    }
-  }
-
-  out.items.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
-  return out;
-}
-
-function readName(dir) {
-  try {
-    const txt = stripBom(fs.readFileSync(path.join(dir, 'filelist.xml'), 'utf8'));
-    const m = txt.match(/<contentpackage\b[^>]*\bname\s*=\s*"([^"]*)"/i);
-    return m ? m[1] : null;
   } catch {
     return null;
   }
@@ -518,154 +440,10 @@ async function refreshChecks(dir, ids, hooks = {}) {
   return { checks: writeChecks(dir, map), apiKeyError, mode };
 }
 
-/** 游戏写 filelist.xml 时的属性顺序（照抄真实样本） */
-const ATTR_ORDER = [
-  'name',
-  'steamworkshopid',
-  'corepackage',
-  'modversion',
-  'gameversion',
-  'installtime',
-  'expectedhash',
-  'altnames'
-];
-
-/** 把 installtime 按游戏自己的写法写进 filelist.xml（属性顺序与取值大小写也照着来） */
-function stampFilelist(file, installTime) {
-  const raw = stripBom(fs.readFileSync(file, 'utf8'));
-  const m = raw.match(/<contentpackage\b([^>]*)>/i);
-  if (!m) throw new Error('filelist.xml 里找不到 <contentpackage>');
-
-  const attrs = {};
-  const re = /([\w:.-]+)\s*=\s*"([^"]*)"/g;
-  let a;
-  while ((a = re.exec(m[1]))) attrs[a[1]] = a[2];
-  attrs.installtime = String(installTime);
-  if (attrs.corepackage) attrs.corepackage = String(attrs.corepackage).toLowerCase();
-
-  const keys = [
-    ...ATTR_ORDER.filter((k) => k in attrs),
-    ...Object.keys(attrs).filter((k) => !ATTR_ORDER.includes(k))
-  ];
-  const tag = `<contentpackage ${keys.map((k) => `${k}="${escapeAttr(attrs[k])}"`).join(' ')}>`;
-  fs.writeFileSync(file, raw.replace(m[0], tag), 'utf8');
-}
-
-/** 把 src 镜像到 dest：补上新增/改动的文件，删掉源里已经没有的 */
-function mirrorDir(src, dest, hooks) {
-  const { onFile = () => {}, isCancelled = () => false } = hooks || {};
-  fs.mkdirSync(dest, { recursive: true });
-
-  const walk = (rel) => {
-    const from = path.join(src, rel);
-    const to = path.join(dest, rel);
-    let entries;
-    try {
-      entries = fs.readdirSync(from, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (isCancelled()) return;
-      const childRel = rel ? path.join(rel, e.name) : e.name;
-      const childFrom = path.join(src, childRel);
-      const childTo = path.join(dest, childRel);
-
-      if (e.isDirectory()) {
-        walk(childRel);
-      } else {
-        onFile(childRel);
-        let need = true;
-        try {
-          const a = fs.statSync(childFrom);
-          const b = fs.statSync(childTo);
-          need = a.size !== b.size;
-        } catch {
-          need = true;
-        }
-        if (need) {
-          fs.mkdirSync(path.dirname(childTo), { recursive: true });
-          fs.copyFileSync(childFrom, childTo);
-        }
-      }
-    }
-  };
-  walk('');
-
-  // 删掉源里没有的（用相对路径集合比对）
-  const collect = (root) => {
-    const set = new Set();
-    const w = (rel) => {
-      let es;
-      try {
-        es = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const e of es) {
-        const childRel = rel ? path.join(rel, e.name) : e.name;
-        if (e.isDirectory()) w(childRel);
-        else set.add(childRel.toLowerCase());
-      }
-    };
-    w('');
-    return set;
-  };
-  const srcFiles = collect(src);
-  for (const rel of collect(dest)) {
-    if (srcFiles.has(rel)) continue;
-    if (isCancelled()) break;
-    const victim = path.join(dest, rel);
-    try {
-      fs.unlinkSync(victim);
-    } catch {
-      /* 忽略 */
-    }
-  }
-}
-
-/**
- * 执行同步。只做两件事：把官方内容搬过去、把 installtime 写成新版本号。
- * 内容一个字节都不改，所以哈希不变。
- */
-function runWorkshopSync(settings, items, hooks = {}) {
-  const { onProgress = () => {}, isCancelled = () => false } = hooks || {};
-  const total = items.length;
-  const errors = [];
-  let done = 0;
-
-  for (const item of items) {
-    if (isCancelled()) break;
-
-    onProgress({ phase: 'copying', done, total, current: item.name, errors: errors.length });
-
-    const srcDir = path.join(settings.workshopModsDir || '', item.id);
-    const dstDir = path.join(settings.installedWorkshopDir || '', item.id);
-
-    try {
-      if (!item.latestTime) throw new Error('拿不到最新版本的时间戳，无法标记 installtime');
-
-      mirrorDir(srcDir, dstDir, { isCancelled });
-      // 镜像会把 Steam 那份 filelist.xml 覆盖过来（没有 installtime），这里补上
-      stampFilelist(path.join(dstDir, 'filelist.xml'), item.latestTime);
-      done++;
-    } catch (e) {
-      errors.push({ id: item.id, name: item.name, message: String((e && e.message) || e) });
-    }
-  }
-
-  onProgress({ phase: 'done', done, total, current: null, errors: errors.length });
-  return { done, total, errors };
-}
-
 module.exports = {
   acfPath,
   readWorkshopAcf,
   installTimeOf,
-  planWorkshopSync,
-  runWorkshopSync,
-  stampFilelist,
-  mirrorDir,
   readChecks,
   writeChecks,
   isDelisted,

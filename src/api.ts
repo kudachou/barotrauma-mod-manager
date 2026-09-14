@@ -16,9 +16,6 @@ import type {
   WorkshopDetails,
   ModInfo,
   AppliedInfo,
-  WorkshopSyncInfo,
-  WorkshopSyncProgress,
-  WorkshopSyncResult,
   WorkshopCheckRefresh
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
@@ -108,24 +105,6 @@ function isDelistedMock(checks: Record<string, { exists?: boolean }>, id?: strin
   return !!c && c.exists === false;
 }
 
-/** 预览模式：假装有 3 个 mod 需要同步（最后一个是 Steam 还没下完的） */
-function mockWorkshopSync(): WorkshopSyncInfo {
-  const ws = state.mods.filter((m) => m.source === 'workshop').slice(0, 3);
-  const now = Math.floor(Date.now() / 1000);
-  return {
-    available: true,
-    acfPath: '…\\steamapps\\workshop\\appworkshop_602960.acf',
-    reason: null,
-    items: ws.map((m, i) => ({
-      id: m.id,
-      name: m.name,
-      reason: i === 2 ? 'downloading' : 'update',
-      installedTime: now - 86400 * (30 - i),
-      latestTime: now - 86400 * 3
-    }))
-  };
-}
-
 /** 预览模式下的更新状态：没有安装包，直接告诉界面"不支持" */
 function mockUpdateState(): UpdateState {
   return {
@@ -179,7 +158,6 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       warnings: [],
       applied: { available: true, reason: null, keys: appliedKeys(), missing: [] },
       relations: { ...state.relations },
-      workshopSync: mockWorkshopSync(),
       checksStale: false,
       checksDelisted: Object.values(checks).filter((c) => c.exists === false).length,
       checksUnknown: 0,
@@ -370,17 +348,8 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       skipped: []
     };
   },
-  cancelWorkshopBackup: async (): Promise<boolean> => true,  onBackupProgress: (_cb: (p: BackupProgress) => void): void => {},
-
-  // 同步工坊更新到游戏
-  planWorkshopSync: async (): Promise<WorkshopSyncInfo> => mockWorkshopSync(),
-  startWorkshopSync: async (): Promise<WorkshopSyncResult> => {
-    const plan = mockWorkshopSync();
-    const runnable = plan.items.filter((i) => i.reason !== 'downloading');
-    return { done: runnable.length, total: runnable.length, errors: [] };
-  },
-  cancelWorkshopSync: async (): Promise<boolean> => true,
-  onWorkshopSyncProgress: (_cb: (p: WorkshopSyncProgress) => void): void => {},
+  cancelWorkshopBackup: async (): Promise<boolean> => true,
+  onBackupProgress: (_cb: (p: BackupProgress) => void): void => {},
 
   // 预览模式：给一段示例描述，用来展示工坊描述的排版效果
   getWorkshopDetails: async (id: string): Promise<WorkshopDetails | null> => {

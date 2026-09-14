@@ -301,49 +301,6 @@ app.whenReady().then(async () => {
   })()`);
   await sleep(400);
 
-  // 「同步到游戏」：弹窗要能分清「可以同步」与「Steam 下载中」
-  await win.webContents.executeJavaScript(`(() => {
-    const b = Array.from(document.querySelectorAll('.topbar .btn')).find((x) =>
-      x.textContent.includes('同步到游戏')
-    );
-    if (b) b.click();
-  })()`);
-  await sleep(900);
-  console.log(
-    'sync-modal=' +
-      JSON.stringify(
-        await win.webContents.executeJavaScript(`(() => {
-          const nums = Array.from(document.querySelectorAll('.bk-num')).map((x) =>
-            x.textContent.trim()
-          );
-          const labels = Array.from(document.querySelectorAll('.bk-label')).map((x) =>
-            x.textContent.trim()
-          );
-          const rows = Array.from(document.querySelectorAll('.bk-row')).map((r) =>
-            r.textContent.replace(/\\s+/g, ' ').trim()
-          );
-          const warn = document.querySelector('.warn-bar');
-          return {
-            数字: nums,
-            标签: labels,
-            明细行数: rows.length,
-            提示: warn ? warn.textContent.replace(/\\s+/g, ' ').trim().slice(0, 60) : null,
-            按钮: Array.from(document.querySelectorAll('.modal-foot .btn')).map((x) =>
-              x.textContent.trim()
-            )
-          };
-        })()`)
-      )
-  );
-  await shot(win, '19-sync-modal');
-  await win.webContents.executeJavaScript(`(() => {
-    const b = Array.from(document.querySelectorAll('.modal-foot .btn')).find(
-      (x) => x.textContent.trim() === '取消'
-    );
-    if (b) b.click();
-  })()`);
-  await sleep(400);
-
   // 「已下架」标记 + 一键备份这些
   console.log(
     'delisted-chip=' +
@@ -404,6 +361,15 @@ app.whenReady().then(async () => {
       (x) => x.textContent.trim() === '取消'
     );
     if (b) b.click();
+  })()`);
+  await sleep(400);
+
+  // 复位「已下架」筛选，否则后面的测试会一直在筛选后的列表上操作
+  await win.webContents.executeJavaScript(`(() => {
+    const chip = Array.from(document.querySelectorAll('.toolbar .btn')).find((b) =>
+      b.textContent.includes('已下架')
+    );
+    if (chip && chip.classList.contains('primary')) chip.click();
   })()`);
   await sleep(400);
 
@@ -494,10 +460,13 @@ app.whenReady().then(async () => {
 
   await win.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[0].click()`);
   await sleep(600);
-  // 优先点开一个「工坊有更新」的本地 mod，检查版本对比界面
+  // 详情页测试要验证「历史版本」和「删除本地 mod」——这两块只有本地 mod 才有，
+  // 所以必须明确挑一张本地卡（不能退回 cards[0]，那可能是工坊 mod）
   const picked = await win.webContents.executeJavaScript(`(() => {
     const cards = Array.from(document.querySelectorAll('.card'));
-    const c = cards.find((x) => x.querySelector('.badge.st-older')) || cards[0];
+    const local = cards.filter((x) => x.querySelector('.badge.src-local'));
+    const c =
+      local.find((x) => x.querySelector('.badge.st-older')) || local[0] || cards[0];
     if (!c) return null;
     c.click();
     return (c.querySelector('.card-name') || {}).textContent || null;
@@ -761,17 +730,10 @@ app.whenReady().then(async () => {
         })()`)
       )
   );
-  // 展开描述再截一张，确认排版
-  await win.webContents.executeJavaScript(`(() => {
-    const b = Array.from(document.querySelectorAll('.modal .btn')).find((x) =>
-      x.textContent.includes('展开全部描述')
-    );
-    if (b) b.click();
-  })()`);
-  await sleep(400);
+  // 描述现在不折叠（整段铺开、由弹窗统一滚），直接截图
   await shot(win, '16-workshop-desc');
 
-  // 确认展开后「没有内层滚动条、由弹窗整体滚」
+  // 确认「没有内层滚动条、由弹窗整体滚」
   console.log(
     'desc-scroll=' +
       JSON.stringify(
@@ -781,7 +743,6 @@ app.whenReady().then(async () => {
           if (!w || !body) return { present: false };
           const cs = getComputedStyle(w);
           return {
-            expanded: w.classList.contains('open'),
             wrapMaxHeight: cs.maxHeight,
             wrapOverflowY: cs.overflowY,
             wrapScrollable: w.scrollHeight > w.clientHeight + 2,
