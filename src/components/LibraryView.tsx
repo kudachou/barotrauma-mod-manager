@@ -31,22 +31,35 @@ export default function LibraryView({
   const [sort, setSort] = useState<SortKey>('name');
   const [onlyOutdated, setOnlyOutdated] = useState(false);
 
+  /*
+   * 分类芯片和计数都只针对「当前来源」下的 mod。
+   * 否则切到「工坊」时还会看到只有本地 mod 才有的分类，点进去却是空的。
+   */
+  const sourceMods = useMemo(
+    () => (source === 'all' ? mods : mods.filter((m) => m.source === source)),
+    [mods, source]
+  );
+
   const catList = useMemo(() => {
     const s = new Set<string>();
-    for (const m of mods) {
+    for (const m of sourceMods) {
       for (const c of m.categories) s.add(c);
       for (const c of m.autoCategories) s.add(c);
     }
+    // 自定义分类是用户自己建的标签库，与来源无关，始终列出
     for (const c of categories.custom) s.add(c);
     return ['全部', ...Array.from(s).sort((a, b) => a.localeCompare(b, 'zh'))];
-  }, [mods, categories]);
+  }, [sourceMods, categories]);
 
   const outdatedCount = useMemo(
     () => mods.filter((m) => m.counterpart?.status === 'older').length,
     [mods]
   );
 
-  const uncategorizedCount = useMemo(() => mods.filter(isUncategorized).length, [mods]);
+  const uncategorizedCount = useMemo(
+    () => sourceMods.filter(isUncategorized).length,
+    [sourceMods]
+  );
 
   /*
    * 筛选条件可能因为数据变化而「失效」：更新完就没有「有更新」的 mod 了，

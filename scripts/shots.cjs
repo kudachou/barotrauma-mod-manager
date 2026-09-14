@@ -252,6 +252,55 @@ app.whenReady().then(async () => {
   })()`);
   await sleep(300);
 
+  /*
+   * 回归测试：切到「工坊」后，分类芯片的计数要跟着来源变，不能还在数本地 mod。
+   * 曾经的 bug：只查看工坊时，「未分类」芯片显示的数字仍然包含本地 mod。
+   */
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.seg button')).find((x) =>
+      x.textContent.includes('工坊')
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(500);
+  const wsScope = await win.webContents.executeJavaScript(`(() => {
+    const chip = Array.from(document.querySelectorAll('.chips-row .tag-toggle')).find((b) =>
+      b.textContent.includes('未分类')
+    );
+    const n = chip ? Number((chip.textContent.match(/(\\d+)/) || [])[1] || 0) : -1;
+    if (chip) chip.click();
+    return { 芯片数字: n };
+  })()`);
+  await sleep(500);
+  const wsFiltered = await win.webContents.executeJavaScript(`(() => {
+    const cards = Array.from(document.querySelectorAll('.card'));
+    return {
+      结果文案: (document.querySelector('.result-count') || {}).textContent || '',
+      卡片数: cards.length,
+      筛出来的都是工坊: cards.length > 0 && cards.every((c) => c.querySelector('.badge.src-workshop'))
+    };
+  })()`);
+  console.log(
+    'uncategorized-scope=' +
+      JSON.stringify({
+        ...wsScope,
+        ...wsFiltered,
+        芯片数字与实际一致: wsFiltered.卡片数 === wsScope.芯片数字
+      })
+  );
+  // 复位：来源回「全部」、分类回「全部」
+  await win.webContents.executeJavaScript(`(() => {
+    const s = Array.from(document.querySelectorAll('.seg button')).find((x) =>
+      x.textContent.includes('全部')
+    );
+    if (s) s.click();
+    const c = Array.from(document.querySelectorAll('.chips-row .tag-toggle')).find(
+      (x) => x.textContent.trim() === '全部'
+    );
+    if (c) c.click();
+  })()`);
+  await sleep(400);
+
   // 滚动验证：卡片区必须能滚，且工具栏保持可见
   const scroll = await win.webContents.executeJavaScript(`(() => {
     const c = document.querySelector('.lib-scroll');
