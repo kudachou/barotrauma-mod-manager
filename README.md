@@ -21,7 +21,8 @@
 **合集**
 - 管理游戏的 `ModLists\*.xml`：新建 / 重命名 / 删除
 - 拖拽排序（**顺序即加载顺序**）、搜索添加、移除、缺失提示
-- **一键应用到游戏**：解析 → 备份 `config_player.xml` → 只替换 `contentpackages` 段
+- **一键应用到游戏**：解析 → 备份 `config_player.xml`（固定一个备份，每次覆盖）→ 只替换 `contentpackages` 段
+  - 应用后**立刻重新扫描**，界面上「游戏当前应用」和「当前应用」徽章马上就是新的（不用点第二次）
 - **「游戏当前应用」**：合集列表顶部直接列出游戏现在真正加载的 mod（读自 `config_player.xml`，
   按加载顺序），只读；内容与之一致的合集会打上「当前应用」徽章
 
@@ -202,12 +203,16 @@ ERROR: Cannot create symbolic link … 客户端没有所需的特权。
 
 1. 把 `Workshop` 条目解析成 `…\WorkshopMods\Installed\{id}\filelist.xml`
    （**注意**：游戏实际加载的是 `Installed` 目录，不是 Steam 的 `workshop\content` 订阅缓存）
-2. 把 `Local` 条目解析成 `…\LocalMods\{名称}\filelist.xml`
-3. 备份 `config_player.xml.bak-<时间戳>`
+2. 把 `Local` 条目解析成 `LocalMods\{名称}\filelist.xml`（**游戏的相对写法**，写绝对路径游戏认不出来）
+3. 备份到 `config_player.xml.bak`（**固定就这一个文件，每次应用覆盖它**）
 4. **只替换** `<contentpackages>` 段
 
 第 4 步是字符串级替换而非整份重写，并且刻意沿用原文件的行尾风格（CRLF/LF）与缩进、
 保留 UTF-8 BOM —— 也就是段外的内容**逐字节不变**。如果文件里没有该段，直接中止、不写任何内容。
+
+内容跟当前配置**完全一样时什么都不写**（连备份都不动），所以反复点「应用到游戏」不会把备份
+冲成"已应用之后"的状态。旧版本（≤ 0.2.5）每次应用都会留一个 `config_player.xml.bak-<时间戳>`，
+应用多了游戏根目录里全是这些文件；新版在下次应用时会把它们**一并清掉**，之后永远只有一个。
 
 ### 版本对比
 
@@ -284,6 +289,7 @@ Steam 把订阅的 mod 下载到 `steamapps\workshop\content\<appid>\<id>`，
 ## 安全说明
 
 - **应用合集**：先备份再写，只动 `<contentpackages>` 段，段外逐字节不变，缺段则中止。
+  备份固定在 `config_player.xml.bak` 一个文件上，每次应用覆盖，不在游戏目录里堆积。
 - **用创意工坊版覆盖本地**：先把本地文件夹**同盘改名**到 `LocalMods` 的**同级**目录
   `ModManagerBackups\`（改名是瞬时的，不占额外空间），失败会自动回滚。
   备份刻意不放在 `LocalMods` 里，避免被游戏当成 mod 扫描到。
@@ -346,7 +352,13 @@ node scripts/test-preview.cjs                # 封面服务（需要联网）
 pnpm exec electron scripts/smoke-app.cjs     # 端到端（真实目录，只读）
 pnpm exec electron scripts/shots.cjs         # 界面截图 + 滚动/交互校验
 pnpm exec electron scripts/test-desc-scroll.cjs  # 工坊描述能否真的滚（发真实滚轮事件）
+pnpm exec electron scripts/test-apply-ui.cjs     # 「应用到游戏」点一次界面就更新（隔离临时目录）
 ```
+
+`test-apply-ui.cjs` 是为了用户反馈的那个坑留下的：**点一次「应用到游戏」，config 确实写进去了，
+但界面没刷新**，看起来像没生效，于是又点一次。脚本用隔离的 `userData` + 临时游戏目录跑真实
+IPC，断言「点击前 0 个『当前应用』徽章 → 点一次后立刻 1 个」，并检查磁盘上只有一个固定备份。
+把 `CollectionsView` 里应用后的那次 `onRefresh()` 注释掉，这个脚本会失败 —— 它是有效的。
 
 `test-desc-scroll.cjs` 是为了一个具体的坑留下的：工坊描述很长时，光看
 「scrollHeight > clientHeight」这种静态条件会误判成"能滚"。必须用
@@ -355,7 +367,7 @@ pnpm exec electron scripts/test-desc-scroll.cjs  # 工坊描述能否真的滚�
 
 `test-backend.cjs` 覆盖了 `filelist.xml` 解析（含单引号、老格式 `version` 属性、BOM、
 以及 `modversion` 被 `gameversion` 误匹配的经典坑）、版本比较、合集往返、
-以及「应用到 config 时区域外逐字节不变 / BOM 保留 / 缺段中止」。
+以及「应用到 config 时区域外逐字节不变 / BOM 保留 / 缺段中止 / 备份只留一个且不累积」。
 
 要指定游戏目录时可用环境变量 `BMM_GAME_DIR` / `BMM_WORKSHOP_DIR`。
 

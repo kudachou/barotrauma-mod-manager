@@ -6,13 +6,43 @@ function toSlash(p) {
   return String(p).replace(/\\/g, '/');
 }
 
-function stamp(d) {
-  const t = d || new Date();
-  const p = (n, w = 2) => String(n).padStart(w, '0');
-  return (
-    `${t.getFullYear()}${p(t.getMonth() + 1)}${p(t.getDate())}` +
-    `-${p(t.getHours())}${p(t.getMinutes())}${p(t.getSeconds())}`
-  );
+/**
+ * 备份文件名：**固定一个** `<config_player.xml>.bak`，每次应用直接覆盖。
+ *
+ * 老版本用的是 `.bak-<时间戳>`，应用一次生成一个 —— 用户点了十几次之后游戏目录里
+ * 就躺了二十个备份文件（每个 6~11 KB），把游戏根目录搞得一团糟。用户明确要求
+ * 只留一个、每次替换。备份仍然存在，只是不再累积。
+ */
+function backupPathOf(cfgPath) {
+  return `${cfgPath}.bak`;
+}
+
+/**
+ * 清掉历史遗留的 `.bak-<YYYYMMDD-HHMMSS>` 备份（旧版本留下的）。
+ * 只认我们自己那个时间戳格式，其它名字一律不碰。
+ * @returns {string[]} 被删掉的文件名（用于在界面上如实汇报）
+ */
+function pruneLegacyBackups(cfgPath) {
+  const dir = path.dirname(cfgPath);
+  const base = path.basename(cfgPath);
+  const legacy = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.bak-\\d{8}-\\d{6}$`);
+  const removed = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return removed;
+  }
+  for (const n of names) {
+    if (!legacy.test(n)) continue;
+    try {
+      fs.rmSync(path.join(dir, n), { force: true });
+      removed.push(n);
+    } catch {
+      // 删不掉（占用/权限）不影响本次应用，下次再试
+    }
+  }
+  return removed;
 }
 
 function escapeAttr(s) {
@@ -79,7 +109,8 @@ function localModPath(settings, name) {
 
 /**
  * 把合集应用到游戏：只替换 config_player.xml 里的 contentpackages 段，其余设置**逐字节**保留
- * （包括 BOM 和换行风格）。写之前先备份。
+ * （包括 BOM 和换行风格）。写之前先备份到固定的 `<config>.bak`（覆盖上一次），
+ * 并顺手清理旧版本堆下来的 `.bak-<时间戳>`。
  */
 function applyToGame(settings, entries) {
   const cfgPath = settings.configPlayerPath;
@@ -121,11 +152,33 @@ function applyToGame(settings, entries) {
   const replaced = raw.replace(/[ \t]*<contentpackages>[\s\S]*?<\/contentpackages>/i, block);
   const out = hasBom ? BOM + replaced : replaced;
 
-  const backup = `${cfgPath}.bak-${stamp()}`;
+  // 旧版遗留的时间戳备份，顺手清掉
+  const prunedBackups = pruneLegacyBackups(cfgPath);
+
+  // 内容没变就别动文件：反复点「应用到游戏」不会把备份覆盖成"已应用之后"的状态
+  if (replaced === raw) {
+    return {
+      backup: null,
+      backupName: null,
+      changed: false,
+      missing,
+      count: packages.length,
+      prunedBackups
+    };
+  }
+
+  const backup = backupPathOf(cfgPath);
   fs.copyFileSync(cfgPath, backup);
   fs.writeFileSync(cfgPath, out, 'utf8');
 
-  return { backup, missing, count: packages.length };
+  return {
+    backup,
+    backupName: path.basename(backup),
+    changed: true,
+    missing,
+    count: packages.length,
+    prunedBackups
+  };
 }
 
 /**
@@ -182,7 +235,8 @@ module.exports = {
   buildContentPackagesBlock,
   readAppliedPackages,
   localModPath,
+  backupPathOf,
+  pruneLegacyBackups,
   escapeAttr,
-  toSlash,
-  stamp
+  toSlash
 };

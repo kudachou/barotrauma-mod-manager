@@ -224,10 +224,26 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   applyModlist: async (
     name: string,
     entries: ModlistEntry[]
-  ): Promise<{ ok: true; backup: string; missing: string[] }> => {
+  ): Promise<{
+    ok: true;
+    backup: string | null;
+    backupName: string | null;
+    changed: boolean;
+    missing: string[];
+    count: number;
+    prunedBackups: string[];
+  }> => {
     void name;
     void entries;
-    return { ok: true, backup: '（预览模式未真正写入 config_player.xml）', missing: [] };
+    return {
+      ok: true,
+      backup: null,
+      backupName: null,
+      changed: false,
+      missing: [],
+      count: 0,
+      prunedBackups: []
+    };
   },
 
   fetchPreviews: async (_ids: string[]): Promise<void> => {},

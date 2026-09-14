@@ -20,7 +20,7 @@ const {
   removeModFromModlist,
   xmlEscape
 } = require('./modlists');
-const { applyToGame, stamp, readAppliedPackages } = require('./config');
+const { applyToGame, readAppliedPackages } = require('./config');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -334,7 +334,15 @@ function registerIpc() {
     void name;
     const s = getSettings();
     const r = applyToGame(s, entries);
-    return { ok: true, backup: r.backup, missing: r.missing, count: r.count };
+    return {
+      ok: true,
+      backup: r.backup,
+      backupName: r.backupName,
+      changed: r.changed,
+      missing: r.missing,
+      count: r.count,
+      prunedBackups: r.prunedBackups || []
+    };
   });
 
   /* ------------------------------- 封面 -------------------------------- */

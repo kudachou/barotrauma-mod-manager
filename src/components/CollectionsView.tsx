@@ -144,7 +144,13 @@ export default function CollectionsView({
     void 0;
   }
 
-  async function saveCurrent(): Promise<boolean> {
+  /**
+   * 保存当前合集。
+   * @param skipRefresh 「应用到游戏」时用：那一步最后会自己刷新一次，
+   *   这里就别刷了 —— 一是白扫一遍磁盘，二是那次刷新发生在写 config 之前，
+   *   刷出来的还是旧的应用状态。
+   */
+  async function saveCurrent(skipRefresh = false): Promise<boolean> {
     if (!current) return false;
     const name = current.name.trim() || '未命名';
     const fileName = safeFileName(name);
@@ -156,7 +162,7 @@ export default function CollectionsView({
       setCurrent({ ...current, name, fileName });
       setSelectedFile(fileName);
       setDirty(false);
-      await onRefresh();
+      if (!skipRefresh) await onRefresh();
       return true;
     } catch (e: any) {
       onToast('err', '保存合集失败', String(e?.message || e));
@@ -166,23 +172,32 @@ export default function CollectionsView({
 
   async function applyCurrent() {
     if (!current) return;
-    const ok = await saveCurrent();
+    const ok = await saveCurrent(true);
     if (!ok) return;
     try {
       const r = await api.applyModlist(current.name, current.entries);
+      // 关键：应用之后必须重新扫描一遍。
+      // saveCurrent() 里的那次刷新发生在写 config 之前，所以「游戏当前应用」列表和卡片上的
+      // 「当前应用」标记还停留在旧状态 —— 看起来像没应用成功，会让人再点一次。
+      await onRefresh();
+
       const missing: string[] = (r && r.missing) || [];
+      const pruned: string[] = (r && r.prunedBackups) || [];
+      const pruneNote = pruned.length ? `，并清理了 ${pruned.length} 个旧备份` : '';
       if (missing.length) {
         const head = missing.slice(0, 3).join('、');
         onToast(
           'warn',
           `已应用，但有 ${missing.length} 个 mod 游戏还没安装`,
-          `${head}${missing.length > 3 ? ' 等' : ''} —— 启动游戏后会自动安装，本次已照常写入`
+          `${head}${missing.length > 3 ? ' 等' : ''} —— 启动游戏后会自动安装，本次已照常写入${pruneNote}`
         );
+      } else if (r && r.changed === false) {
+        onToast('ok', '已应用到游戏', `游戏里的配置本来就是这个合集，没有改动文件${pruneNote}`);
       } else {
         onToast(
           'ok',
           '已应用到游戏',
-          r?.backup ? `原配置已备份为 ${r.backup}` : '下次启动游戏即生效'
+          r?.backupName ? `原配置已备份为 ${r.backupName}（每次应用覆盖同一个）${pruneNote}` : '下次启动游戏即生效'
         );
       }
     } catch (e: any) {
@@ -446,7 +461,7 @@ export default function CollectionsView({
             >
               <IconTrash size={14} />
             </button>
-            <button className="btn sm" onClick={saveCurrent} disabled={!dirty}>
+            <button className="btn sm" onClick={() => void saveCurrent()} disabled={!dirty}>
               <IconSave size={14} />
               保存
             </button>

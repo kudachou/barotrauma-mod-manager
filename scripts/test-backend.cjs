@@ -271,6 +271,59 @@ try {
   ok(/\r\n/.test(after), 'CRLF 换行风格被保留');
   ok(r.missing.length === 1 && r.missing[0] === '没装的mod', '正确报告未安装的 mod');
 
+  /* ---- 备份策略：只留一个、每次应用覆盖；顺手清理旧版堆下来的时间戳备份 ---- */
+  const applyDir = path.dirname(cfgPath);
+  const bakFixed = path.join(applyDir, 'config_player.xml.bak');
+  const bakList = () =>
+    fs.readdirSync(applyDir).filter((n) => n.startsWith('config_player.xml.bak'));
+  const applySettings = {
+    configPlayerPath: cfgPath,
+    gameDir: path.join(TMP, 'apply'),
+    installedWorkshopDir: installedRoot,
+    localModsDir: localRoot
+  };
+
+  ok(r.changed === true, '内容变化时 changed=true');
+  ok(r.backupName === 'config_player.xml.bak', '备份用固定文件名 config_player.xml.bak');
+  ok(fs.existsSync(bakFixed), '固定备份文件已生成');
+  ok(fs.readFileSync(bakFixed, 'utf8') === before, '备份内容 = 应用之前的配置');
+  ok(bakList().length === 1, `首次应用后只有 1 个备份文件（实际 ${bakList().length}）`);
+
+  // 造两个老版本留下的时间戳备份，外加一个不是我们格式的备份（不许误删）
+  fs.writeFileSync(path.join(applyDir, 'config_player.xml.bak-20260101-010101'), 'old1', 'utf8');
+  fs.writeFileSync(path.join(applyDir, 'config_player.xml.bak-20260102-020202'), 'old2', 'utf8');
+  fs.writeFileSync(path.join(applyDir, 'config_player.xml.bak-mine'), 'keepme', 'utf8');
+
+  // 第二次应用（内容不同）→ 覆盖同一个备份
+  const bkApply2 = config.applyToGame(applySettings, [
+    { type: 'workshop', name: 'LuaCsForBarotrauma', id: '2559634234' }
+  ]);
+  const cfgAfterR2 = fs.readFileSync(cfgPath, 'utf8');
+  ok(
+    bkApply2.prunedBackups.length === 2,
+    `清理掉 2 个旧时间戳备份（实际 ${bkApply2.prunedBackups.length}）`
+  );
+  ok(
+    !fs.existsSync(path.join(applyDir, 'config_player.xml.bak-20260101-010101')) &&
+      !fs.existsSync(path.join(applyDir, 'config_player.xml.bak-20260102-020202')),
+    '旧的时间戳备份文件被删除'
+  );
+  ok(fs.existsSync(path.join(applyDir, 'config_player.xml.bak-mine')), '不符合时间戳格式的备份不动');
+  ok(fs.readFileSync(bakFixed, 'utf8') === after, '第二次应用覆盖固定备份（内容是上一次应用后的状态）');
+  ok(
+    bakList().sort().join(',') === 'config_player.xml.bak,config_player.xml.bak-mine',
+    `备份没有累积（实际 ${bakList().sort().join(',')}）`
+  );
+
+  // 第三次应用：内容完全一样 → 不写文件、不碰备份
+  const bkApply3 = config.applyToGame(applySettings, [
+    { type: 'workshop', name: 'LuaCsForBarotrauma', id: '2559634234' }
+  ]);
+  ok(bkApply3.changed === false, '重复应用同一个合集时 changed=false');
+  ok(bkApply3.backup === null, '没有改动就不动备份');
+  ok(fs.readFileSync(bakFixed, 'utf8') === after, '备份没被"已应用之后"的状态冲掉');
+  ok(fs.readFileSync(cfgPath, 'utf8') === cfgAfterR2, '重复应用后配置内容一字未动');
+
   // 缺少 contentpackages 段时必须中止且不写文件
   const badCfg = path.join(TMP, 'apply', 'bad.xml');
   const badBody = '<?xml version="1.0"?>\n<config />\n';
