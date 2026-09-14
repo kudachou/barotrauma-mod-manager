@@ -51,6 +51,33 @@ function buildContentPackagesBlock(packages, eol, indent) {
 const BOM = '\uFEFF';
 
 /**
+ * 本地 mod 在 config_player.xml 里的写法。
+ *
+ * **必须写成游戏自己的相对形式** `LocalMods/<文件夹>/filelist.xml`。
+ *
+ * 游戏是按 `LocalMods/` 这个前缀来认本地 mod 的（Barotrauma.dll 里
+ * "LocalMods"、"LocalMods/" 是独立字符串，配置里游戏自己写的也是这个形式）。
+ * 写绝对路径（`D:/Steam/.../LocalMods/xxx/filelist.xml`）游戏认不出来 ——
+ * 表现就是：mod 明明在启用列表里，进游戏却没有被启用。
+ *
+ * 只有 LocalMods 确实位于游戏目录内时才用相对写法；放在别处（用户自定义路径）
+ * 就只能退回绝对路径，那种情况游戏本来也找不到。
+ */
+function localModPath(settings, name) {
+  const gameDir = settings.gameDir || '';
+  const localDir = settings.localModsDir || '';
+  const abs = path.join(localDir, name, 'filelist.xml');
+
+  if (gameDir && localDir) {
+    const rel = path.relative(gameDir, abs);
+    // 没往上跳（不以 .. 开头）且确实是相对路径 → 用游戏的写法
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return toSlash(rel);
+  }
+  return toSlash(abs);
+}
+
+
+/**
  * 把合集应用到游戏：只替换 config_player.xml 里的 contentpackages 段，其余设置**逐字节**保留
  * （包括 BOM 和换行风格）。写之前先备份。
  */
@@ -83,9 +110,9 @@ function applyToGame(settings, entries) {
       packages.push({ comment: e.name || `#${e.id}`, path: toSlash(p) });
     } else if (e.type === 'local') {
       if (!e.name) continue;
-      const p = path.join(settings.localModsDir || '', e.name, 'filelist.xml');
-      if (!fs.existsSync(p)) missing.push(e.name);
-      packages.push({ comment: e.name, path: toSlash(p) });
+      const abs = path.join(settings.localModsDir || '', e.name, 'filelist.xml');
+      if (!fs.existsSync(abs)) missing.push(e.name);
+      packages.push({ comment: e.name, path: localModPath(settings, e.name) });
     }
   }
 
@@ -154,6 +181,7 @@ module.exports = {
   applyToGame,
   buildContentPackagesBlock,
   readAppliedPackages,
+  localModPath,
   escapeAttr,
   toSlash,
   stamp

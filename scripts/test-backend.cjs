@@ -219,7 +219,12 @@ try {
   const before = fs.readFileSync(cfgPath, 'utf8');
 
   const r = config.applyToGame(
-    { configPlayerPath: cfgPath, installedWorkshopDir: installedRoot, localModsDir: localRoot },
+    {
+      configPlayerPath: cfgPath,
+      gameDir: path.join(TMP, 'apply'),
+      installedWorkshopDir: installedRoot,
+      localModsDir: localRoot
+    },
     [
       { type: 'workshop', name: 'LuaCsForBarotrauma', id: '2559634234' },
       { type: 'workshop', name: '没装的mod', id: '999999999999' },
@@ -232,10 +237,26 @@ try {
   console.log(`  未安装/缺失: ${JSON.stringify(r.missing)}`);
   ok(fs.existsSync(r.backup), '生成了 config 备份');
   ok(after.includes('Installed/2559634234/filelist.xml'), '工坊 mod 写成游戏实际使用的 Installed 路径');
-  ok(after.includes('LocalMods/我的自改版/filelist.xml'), '本地 mod 路径正确（正斜杠）');
+  ok(
+    after.includes('path="LocalMods/我的自改版/filelist.xml"'),
+    '本地 mod 写成游戏自己的相对形式 LocalMods/<文件夹>/filelist.xml'
+  );
+  ok(
+    !/path="[A-Za-z]:[^"]*LocalMods/.test(after),
+    '本地 mod 不能写成绝对路径 —— 游戏按 LocalMods/ 前缀识别，绝对路径它认不出来'
+  );
   ok(after.includes('Vanilla.xml'), 'corepackage 仍为 Vanilla');
   ok(after.includes('keymapping'), '其它设置段仍在');
   ok(!after.includes('old/filelist.xml'), '旧的包列表已被替换');
+
+  // LocalMods 放在游戏目录外时退回绝对路径（那种情况游戏本来也找不到）
+  const outside = path.join(TMP, 'elsewhere', 'LocalMods');
+  writeMod(outside, '外面的mod', `<contentpackage name="外面的mod" modversion="1.0" />`);
+  const outsidePath = config.localModPath(
+    { gameDir: path.join(TMP, 'apply'), localModsDir: outside },
+    '外面的mod'
+  );
+  ok(path.isAbsolute(outsidePath), 'LocalMods 在游戏目录外时退回绝对路径（而不是 ../..）');
 
   const splitOut = (s) => {
     const m = s.match(/^([\s\S]*?)<contentpackages>[\s\S]*?<\/contentpackages>([\s\S]*)$/i);
