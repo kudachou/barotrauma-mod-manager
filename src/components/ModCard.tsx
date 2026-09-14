@@ -32,6 +32,33 @@ export default function ModCard({ mod, onOpen }: { mod: ModInfo; onOpen: (m: Mod
           <span className={`badge ${mod.source === 'local' ? 'src-local' : 'src-workshop'}`}>
             {mod.source === 'local' ? '本地' : '工坊'}
           </span>
+          {mod.delisted && (
+            <span
+              className={`badge ${mod.backedUpLocally ? 'st-backup-ok' : 'st-delisted'}`}
+              title={
+                mod.delistedHow === 'page-invisible'
+                  ? '工坊上匿名看不到这个条目 —— 可能是已下架，也可能是作者（或你自己）把它设成了私有。填一个 Steam API Key 就能准确区分'
+                  : mod.source === 'local'
+                    ? '这个本地 mod 对应的工坊原版已被作者下架（本地副本本来就是安全的）'
+                    : mod.backedUpLocally
+                      ? '已确认从工坊下架，但 LocalMods 里已经有一份备份了 —— 已经安全'
+                      : '已确认从工坊下架，而 LocalMods 里还没有备份 —— 建议马上备份'
+              }
+            >
+              {mod.delistedHow === 'page-invisible'
+                ? '工坊不可见'
+                : mod.source === 'local'
+                  ? '工坊已下架'
+                  : mod.backedUpLocally
+                    ? '已下架 · 已备份'
+                    : '已下架 · 待备份'}
+            </span>
+          )}
+          {mod.installedOnly && !mod.backedUpLocally && (
+            <span className="badge st-different" title="Steam 订阅目录里已经没有它，只剩游戏里这份副本">
+              仅剩游戏副本
+            </span>
+          )}
           {badge && (
             <span className={`badge ${badge.cls}`}>
               {badge.cls === 'st-same' ? (

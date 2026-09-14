@@ -517,6 +517,199 @@ try {
   fs.writeFileSync(cfgNoBlock, '<config><other /></config>', 'utf8');
   const apNoBlock = readAppliedPackages({ configPlayerPath: cfgNoBlock });
   ok(!apNoBlock.available && !!apNoBlock.reason, '没有 contentpackages 段时给出原因');
+
+  /* ------------------ 10. 同步工坊更新到游戏 ------------------ */
+
+  console.log('\n[10] 同步工坊更新到游戏');
+
+  const ws = require('../electron/services/workshopsync');
+  const syncRoot = path.join(TMP, 'sync');
+  const steamDir = path.join(syncRoot, 'steam', 'workshop', 'content', '602960');
+  const instDir = path.join(syncRoot, 'inst', 'Installed');
+  const syncSettings = { workshopModsDir: steamDir, installedWorkshopDir: instDir };
+
+  const T_OLD = 1700000000;
+  const T_NEW = 1700100000;
+
+  const writeFl = (dir, name, id, ver) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'filelist.xml'),
+      `<contentpackage name="${name}" modversion="${ver}" corepackage="False" ` +
+        `steamworkshopid="${id}" gameversion="1.0" expectedhash="ABC">\n</contentpackage>`,
+      'utf8'
+    );
+  };
+
+  // 甲：工坊有新版、Steam 已下完，游戏里是旧的
+  const A = '1111111111';
+  writeFl(path.join(steamDir, A), '甲mod', A, '2.0');
+  fs.writeFileSync(path.join(steamDir, A, 'new.txt'), '新内容', 'utf8');
+  writeFl(path.join(instDir, A), '甲mod', A, '1.0');
+  fs.writeFileSync(path.join(instDir, A, 'stale.txt'), '旧内容', 'utf8');
+  ws.stampFilelist(path.join(instDir, A, 'filelist.xml'), T_OLD);
+
+  // 乙：工坊有新版但 Steam 还没下完（latest != timeupdated）
+  const B = '2222222222';
+  writeFl(path.join(steamDir, B), '乙mod', B, '2.0');
+  writeFl(path.join(instDir, B), '乙mod', B, '1.0');
+  ws.stampFilelist(path.join(instDir, B, 'filelist.xml'), T_OLD);
+
+  // 丙：已订阅但 Installed 里还没有
+  const C = '3333333333';
+  writeFl(path.join(steamDir, C), '丙mod', C, '1.0');
+
+  // 丁：已经是最新的，不该出现在计划里
+  const D = '4444444444';
+  writeFl(path.join(steamDir, D), '丁mod', D, '1.0');
+  writeFl(path.join(instDir, D), '丁mod', D, '1.0');
+  ws.stampFilelist(path.join(instDir, D, 'filelist.xml'), T_NEW);
+
+  const acfFile = path.join(syncRoot, 'steam', 'workshop', 'appworkshop_602960.acf');
+  fs.writeFileSync(
+    acfFile,
+    [
+      '"AppWorkshop"',
+      '{',
+      '\t"appid"\t\t"602960"',
+      '\t"WorkshopItemDetails"',
+      '\t{',
+      `\t\t"${A}"\n\t\t{\n\t\t\t"manifest"\t\t"2"\n\t\t\t"timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_manifest"\t\t"2"\n\t\t}`,
+      `\t\t"${B}"\n\t\t{\n\t\t\t"manifest"\t\t"1"\n\t\t\t"timeupdated"\t\t"${T_OLD}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t}`,
+      `\t\t"${C}"\n\t\t{\n\t\t\t"timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t}`,
+      `\t\t"${D}"\n\t\t{\n\t\t\t"timeupdated"\t\t"${T_NEW}"\n\t\t\t"latest_timeupdated"\t\t"${T_NEW}"\n\t\t}`,
+      '\t}',
+      '}'
+    ].join('\n'),
+    'utf8'
+  );
+
+  ok(ws.acfPath(steamDir) === acfFile, '能从 workshop 目录推出 appworkshop_*.acf 的路径');
+  ok(ws.installTimeOf(path.join(instDir, A)) === T_OLD, '读得出游戏写入的 installtime');
+
+  const syncPlan = ws.planWorkshopSync(syncSettings);
+  ok(syncPlan.available, '.acf 读得到');
+  ok(syncPlan.items.length === 3, `计划里有 ${syncPlan.items.length} 个（已最新的不算）`);
+  const byId = new Map(syncPlan.items.map((i) => [i.id, i]));
+  ok(byId.get(A)?.reason === 'update', '甲判为「工坊有新版」');
+  ok(byId.get(B)?.reason === 'downloading', '乙判为「Steam 下载中」');
+  ok(byId.get(C)?.reason === 'missing', '丙判为「还没装进游戏」');
+  ok(!byId.has(D), '丁已是最新，不列入计划');
+
+  const runnable = syncPlan.items.filter((i) => i.reason !== 'downloading');
+  const res = ws.runWorkshopSync(syncSettings, runnable);
+  ok(res.done === 2 && res.errors.length === 0, `同步完成 ${res.done} 个，无错误`);
+
+  const aFl = fs.readFileSync(path.join(instDir, A, 'filelist.xml'), 'utf8');
+  ok(fs.existsSync(path.join(instDir, A, 'new.txt')), '甲：新文件复制过去了');
+  ok(!fs.existsSync(path.join(instDir, A, 'stale.txt')), '甲：源里已没有的旧文件被删掉');
+  ok(aFl.includes(`installtime="${T_NEW}"`), '甲：installtime 被写成最新版本的时间戳');
+  ok(aFl.includes('modversion="2.0"'), '甲：modversion 来自工坊的新 filelist');
+  ok(/corepackage="false"/.test(aFl) && !/corepackage="False"/.test(aFl), '甲：corepackage 按游戏写法改成小写');
+  ok(
+    aFl.indexOf('steamworkshopid') < aFl.indexOf('corepackage') &&
+      aFl.indexOf('installtime') < aFl.indexOf('expectedhash'),
+    '甲：属性顺序照游戏的写法（steamworkshopid 提前、installtime 在 expectedhash 前）'
+  );
+
+  ok(fs.existsSync(path.join(instDir, C, 'filelist.xml')), '丙：整份装进了 Installed');
+  ok(
+    fs.readFileSync(path.join(instDir, C, 'filelist.xml'), 'utf8').includes(`installtime="${T_NEW}"`),
+    '丙：也写了 installtime'
+  );
+  ok(
+    !fs.existsSync(path.join(instDir, B, 'new.txt')) &&
+      fs.readFileSync(path.join(instDir, B, 'filelist.xml'), 'utf8').includes(`installtime="${T_OLD}"`),
+    '乙（Steam 下载中）完全没被碰'
+  );
+
+  const syncPlan2 = ws.planWorkshopSync(syncSettings);
+  ok(syncPlan2.items.length === 1 && syncPlan2.items[0].id === B, '再规划一次，只剩「下载中」的乙');
+
+  const noAcf = ws.readWorkshopAcf(path.join(syncRoot, 'nowhere'));
+  ok(!noAcf.available && !!noAcf.reason, '.acf 找不到时安全返回而不是抛错');
+
+  /* ------------------ 11. 下架标记与「只备份已下架的」 ------------------ */
+
+  console.log('\n[11] 下架标记与「只备份已下架的」');
+
+  const dChecks = {
+    '1001': { v: ws.CHECKS_VERSION, exists: true, checkedAt: Date.now() },
+    '1002': { v: ws.CHECKS_VERSION, exists: false, checkedAt: Date.now() }
+  };
+  ok(!ws.isDelisted(dChecks, '1001'), 'exists=true 不算下架');
+  ok(ws.isDelisted(dChecks, '1002'), 'exists=false 算下架');
+  ok(!ws.isDelisted(dChecks, '9999'), '没查过的 ID 不武断判成下架');
+  ok(
+    !ws.isDelisted({ x: { result: 9, checkedAt: Date.now() } }, 'x'),
+    '只有 result=9 不足以判下架（成人内容也是 9）—— 必须网页核实过'
+  );
+  ok(ws.checksStale(dChecks, ['1001', '9999']), '有没查过的 ID → 缓存算脏');
+  ok(!ws.checksStale(dChecks, ['1001', '1002']), '都查过且新鲜 → 不脏');
+  ok(
+    ws.checksStale({ x: { v: ws.CHECKS_VERSION, exists: true, checkedAt: Date.now() - 1000 } }, ['x'], 500),
+    '超过 TTL 的检查结果算脏'
+  );
+  ok(
+    ws.checksStale({ x: { result: 9, checkedAt: Date.now() } }, ['x']),
+    '旧格式的缓存算脏（会强制重查一遍）'
+  );
+  ok(
+    !ws.checksStale({ x: { v: ws.CHECKS_VERSION, exists: null, checkedAt: Date.now() } }, ['x']),
+    '刚试过但没核实成的，短时间内不重试（别硬打 Steam）'
+  );
+  ok(
+    !ws.isDelisted({ x: { v: ws.CHECKS_VERSION, exists: null, checkedAt: Date.now() } }, 'x'),
+    'exists=null（没核实成）不算下架 —— 绝不当成「还在」之外的结论'
+  );
+
+  const dRoot = path.join(TMP, 'delist-bk');
+  const dSteam = path.join(dRoot, 'steam', 'content', '602960');
+  const dInst = path.join(dRoot, 'inst');
+  const dLocal = path.join(dRoot, 'LocalMods');
+  fs.mkdirSync(dLocal, { recursive: true });
+  const dSet = {
+    workshopModsDir: dSteam,
+    installedWorkshopDir: dInst,
+    localModsDir: dLocal
+  };
+
+  writeMod(dSteam, '5001', '<contentpackage name="正常mod" modversion="1.0" steamworkshopid="5001" />');
+  writeMod(dSteam, '5002', '<contentpackage name="下架的A" modversion="1.0" steamworkshopid="5002" />');
+  writeMod(dInst, '5002', '<contentpackage name="下架的A" modversion="1.0" steamworkshopid="5002" />');
+  // 只剩 Installed 里那份（Steam 订阅目录里已经没有了）
+  writeMod(dInst, '5003', '<contentpackage name="只剩副本" modversion="1.0" steamworkshopid="5003" />');
+
+  const dMap = { '5001': { exists: true }, '5002': { exists: false }, '5003': { exists: false } };
+
+  const dAll = bk.planWorkshopBackup(dSet, {}, { checks: dMap });
+  ok(dAll.items.length === 3, `全量备份看到 ${dAll.items.length} 个（含只剩 Installed 的那个）`);
+  ok(
+    dAll.items.some((i) => i.id === '5003'),
+    '只剩 Installed 的 mod 也被纳入备份 ← 修的就是这个漏洞'
+  );
+
+  const dOnly = bk.planWorkshopBackup(dSet, {}, { onlyDelisted: true, checks: dMap });
+  ok(dOnly.items.length === 2, `只备份已下架的 → ${dOnly.items.length} 个`);
+  ok(!dOnly.items.some((i) => i.id === '5001'), '正常的 mod 被排除在外');
+  ok(dOnly.items.every((i) => i.delisted), '每一项都带 delisted 标记');
+  const ghost = dOnly.items.find((i) => i.id === '5003');
+  ok(ghost && ghost.installedOnly === true, '只剩 Installed 的那项标了 installedOnly');
+  ok(ghost && ghost.source === path.join(dInst, '5003'), '它的复制来源指向 Installed');
+
+  // 已经有本地备份的，不该再复制一遍（会覆盖用户自己改过的副本）
+  writeMod(
+    dLocal,
+    'npc-local',
+    '<contentpackage name="下架的A" modversion="1.0" steamworkshopid="5002" />'
+  );
+  const dSkip = bk.planWorkshopBackup(dSet, {}, { onlyDelisted: true, checks: dMap });
+  ok(!dSkip.items.some((i) => i.id === '5002'), '已备份到本地的会从计划里剔除');
+  ok(
+    dSkip.skipped.some((s) => s.id === '5002' && /已备份/.test(s.reason)),
+    '跳过的会带明确原因'
+  );
+  ok(dSkip.items.some((i) => i.id === '5003'), '还没备份的照常处理');
 } catch (e) {
   console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
   failures++;

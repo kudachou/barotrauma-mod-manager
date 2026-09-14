@@ -154,6 +154,7 @@ module.exports = {
   applyToGame,
   buildContentPackagesBlock,
   readAppliedPackages,
+  escapeAttr,
   toSlash,
   stamp
 };

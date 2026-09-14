@@ -14,14 +14,18 @@ export function humanSize(bytes: number): string {
 type Phase = 'planning' | 'ready' | 'running' | 'done';
 
 export default function BackupModal({
+  scope = 'all',
   onClose,
   onToast,
   onDone
 }: {
+  /** 'delisted' = 只备份已被作者下架的 mod */
+  scope?: 'all' | 'delisted';
   onClose: () => void;
   onToast: (kind: 'ok' | 'warn' | 'err' | 'info', title: string, msg?: string) => void;
   onDone: () => void;
 }) {
+  const onlyDelisted = scope === 'delisted';
   const [plan, setPlan] = useState<BackupPlan | null>(null);
   const [progress, setProgress] = useState<BackupProgress | null>(null);
   const [phase, setPhase] = useState<Phase>('planning');
@@ -32,7 +36,7 @@ export default function BackupModal({
     api.onBackupProgress((p: BackupProgress) => setProgress(p));
     void (async () => {
       try {
-        const p = await api.planWorkshopBackup();
+        const p = await api.planWorkshopBackup(scope);
         setPlan(p);
         setPhase('ready');
       } catch (e: any) {
@@ -40,7 +44,7 @@ export default function BackupModal({
         setPhase('done');
       }
     })();
-  }, []);
+  }, [scope]);
 
   async function start() {
     setPhase('running');
@@ -52,7 +56,7 @@ export default function BackupModal({
       bytesTotal: plan?.totalBytes || 0
     });
     try {
-      const r = await api.startWorkshopBackup();
+      const r = await api.startWorkshopBackup(scope);
       setResult(r);
     } catch (e: any) {
       setError(String(e?.message || e));
@@ -82,9 +86,20 @@ export default function BackupModal({
       <div className="modal" style={{ width: 'min(680px, 100%)' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div style={{ flex: 1 }}>
-            <div className="modal-title">一键备份所有工坊 mod 到本地</div>
+            <div className="modal-title">
+              {onlyDelisted ? '备份已下架的工坊 mod' : '一键备份所有工坊 mod 到本地'}
+            </div>
             <div className="page-sub" style={{ marginTop: 4 }}>
-              把创意工坊 mod 复制进 <code>LocalMods</code>，之后即使工坊更新或下架，本地这份还在。
+              {onlyDelisted ? (
+                <>
+                  这些 mod 已被作者从创意工坊下架，<b>工坊上再也下不到了</b>。
+                  复制进 <code>LocalMods</code> 变成本地 mod 后就不再依赖工坊和 Steam。
+                </>
+              ) : (
+                <>
+                  把创意工坊 mod 复制进 <code>LocalMods</code>，之后即使工坊更新或下架，本地这份还在。
+                </>
+              )}
             </div>
           </div>
           <button className="btn icon" onClick={onClose} disabled={phase === 'running'} title="关闭">
@@ -109,7 +124,7 @@ export default function BackupModal({
               <div className="bk-stats">
                 <div className="bk-stat">
                   <div className="bk-num">{plan.items.length}</div>
-                  <div className="bk-label">个工坊 mod</div>
+                  <div className="bk-label">{onlyDelisted ? '个待备份' : '个工坊 mod'}</div>
                 </div>
                 <div className="bk-stat">
                   <div className="bk-num">{humanSize(plan.totalBytes)}</div>
@@ -125,6 +140,13 @@ export default function BackupModal({
                 </div>
               </div>
 
+              {onlyDelisted && (
+                <div className="hint" style={{ marginTop: 14, marginBottom: 0 }}>
+                  已经在 <code>LocalMods</code> 里备份过的会自动跳过 ——
+                  既是省事，也是避免覆盖你自己改过的本地副本。它们会列在下面的「跳过」里。
+                </div>
+              )}
+
               <div className="warn-bar" style={{ marginTop: 16 }}>
                 <IconAlert size={16} />
                 <div>
@@ -138,6 +160,25 @@ export default function BackupModal({
                   )}
                 </div>
               </div>
+
+              {plan.items.some((i) => i.installedOnly && !i.existing) && (
+                <div className="danger-bar" style={{ marginTop: 12 }}>
+                  <IconAlert size={16} />
+                  <div>
+                    其中{' '}
+                    <b>{plan.items.filter((i) => i.installedOnly && !i.existing).length} 个</b>{' '}
+                    在 Steam 订阅目录里已经没有了、LocalMods 里也还没备份，
+                    只剩游戏 <code>Installed</code> 里那份副本 —— 这次备份是它们唯一的保底。
+                  </div>
+                </div>
+              )}
+
+              {plan.items.some((i) => i.delisted) && !onlyDelisted && (
+                <div className="hint" style={{ marginTop: 12, marginBottom: 0 }}>
+                  计划里有 {plan.items.filter((i) => i.delisted).length} 个是<b>已被作者下架</b>的 mod。
+                  只想处理这些的话，回列表点「已下架」再点「一键备份这些」。
+                </div>
+              )}
 
               {plan.skipped.length > 0 && (
                 <>

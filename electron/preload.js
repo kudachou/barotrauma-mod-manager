@@ -31,6 +31,13 @@ contextBridge.exposeInMainWorld('api', {
   // 工坊详情（描述 / 标签 / 热度）
   getWorkshopDetails: (id, force) => invoke('workshop:details', id, force),
 
+  // 刷新「工坊条目还在不在」的缓存
+  refreshWorkshopChecks: () => invoke('workshop:refreshChecks'),
+
+  // Steam Web API Key（有就走官方接口检查下架状态）
+  getSteamApiKey: () => invoke('steam:getApiKey'),
+  setSteamApiKey: (key) => invoke('steam:setApiKey', key),
+
   // covers (local mod manual cover)
   setLocalCover: (sourceId, imagePath) => invoke('cover:set', sourceId, imagePath),
 
@@ -63,12 +70,20 @@ contextBridge.exposeInMainWorld('api', {
   deleteLocalMod: (modName, removeFromModlists) =>
     invoke('localmod:delete', modName, removeFromModlists),
 
-  // 一键备份所有工坊 mod 到 LocalMods
-  planWorkshopBackup: () => invoke('backup:plan'),
-  startWorkshopBackup: () => invoke('backup:start'),
+  // 一键备份所有工坊 mod 到 LocalMods（scope='delisted' 时只备份已下架的）
+  planWorkshopBackup: (scope) => invoke('backup:plan', scope),
+  startWorkshopBackup: (scope) => invoke('backup:start', scope),
   cancelWorkshopBackup: () => invoke('backup:cancel'),
   onBackupProgress: (cb) => {
     ipcRenderer.on('backup:progress', (_e, progress) => cb(progress));
+  },
+
+  // 同步工坊更新到游戏（不用启动游戏就能让更新生效）
+  planWorkshopSync: () => invoke('workshopsync:plan'),
+  startWorkshopSync: () => invoke('workshopsync:start'),
+  cancelWorkshopSync: () => invoke('workshopsync:cancel'),
+  onWorkshopSyncProgress: (cb) => {
+    ipcRenderer.on('workshopsync:progress', (_e, progress) => cb(progress));
   },
 
   // 更新

@@ -301,6 +301,112 @@ app.whenReady().then(async () => {
   })()`);
   await sleep(400);
 
+  // 「同步到游戏」：弹窗要能分清「可以同步」与「Steam 下载中」
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.topbar .btn')).find((x) =>
+      x.textContent.includes('同步到游戏')
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(900);
+  console.log(
+    'sync-modal=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const nums = Array.from(document.querySelectorAll('.bk-num')).map((x) =>
+            x.textContent.trim()
+          );
+          const labels = Array.from(document.querySelectorAll('.bk-label')).map((x) =>
+            x.textContent.trim()
+          );
+          const rows = Array.from(document.querySelectorAll('.bk-row')).map((r) =>
+            r.textContent.replace(/\\s+/g, ' ').trim()
+          );
+          const warn = document.querySelector('.warn-bar');
+          return {
+            数字: nums,
+            标签: labels,
+            明细行数: rows.length,
+            提示: warn ? warn.textContent.replace(/\\s+/g, ' ').trim().slice(0, 60) : null,
+            按钮: Array.from(document.querySelectorAll('.modal-foot .btn')).map((x) =>
+              x.textContent.trim()
+            )
+          };
+        })()`)
+      )
+  );
+  await shot(win, '19-sync-modal');
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot .btn')).find(
+      (x) => x.textContent.trim() === '取消'
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(400);
+
+  // 「已下架」标记 + 一键备份这些
+  console.log(
+    'delisted-chip=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const chip = Array.from(document.querySelectorAll('.toolbar .btn')).find((b) =>
+            b.textContent.includes('已下架')
+          );
+          if (!chip) return { present: false };
+          const text = chip.textContent.trim();
+          chip.click();
+          return { present: true, text };
+        })()`)
+      )
+  );
+  await sleep(600);
+  console.log(
+    'delisted-filtered=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const cards = Array.from(document.querySelectorAll('.card'));
+          const badged = cards.filter((c) => c.querySelector('.badge.st-delisted')).length;
+          const backupBtn = Array.from(document.querySelectorAll('.toolbar .btn')).find((b) =>
+            b.textContent.includes('一键备份这些')
+          );
+          return {
+            卡片数: cards.length,
+            每张卡都带已下架徽章: cards.length > 0 && badged === cards.length,
+            出现一键备份按钮: !!backupBtn
+          };
+        })()`)
+      )
+  );
+  await shot(win, '20-delisted');
+
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.toolbar .btn')).find((x) =>
+      x.textContent.includes('一键备份这些')
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(1400);
+  console.log(
+    'delisted-backup=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => ({
+          标题: (document.querySelector('.modal-title') || {}).textContent || null,
+          数字: Array.from(document.querySelectorAll('.bk-num')).map((x) => x.textContent.trim()),
+          按钮: Array.from(document.querySelectorAll('.modal-foot .btn')).map((x) =>
+            x.textContent.trim()
+          )
+        }))()`)
+      )
+  );
+  await shot(win, '21-delisted-backup');
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot .btn')).find(
+      (x) => x.textContent.trim() === '取消'
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(400);
+
   // 滚动验证：卡片区必须能滚，且工具栏保持可见
   const scroll = await win.webContents.executeJavaScript(`(() => {
     const c = document.querySelector('.lib-scroll');

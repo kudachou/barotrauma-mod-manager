@@ -15,7 +15,11 @@ import type {
   DeleteLocalModResult,
   WorkshopDetails,
   ModInfo,
-  AppliedInfo
+  AppliedInfo,
+  WorkshopSyncInfo,
+  WorkshopSyncProgress,
+  WorkshopSyncResult,
+  WorkshopCheckRefresh
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -42,7 +46,8 @@ let state = {
   // 预览模式给一组示例关联：整合包依赖 LuaCs 框架
   relations: {
     'workshop:3100128373': ['workshop:2559634234', 'workshop:2683570256']
-  } as Record<string, string[]>
+  } as Record<string, string[]>,
+  apiKey: ''
 };
 
 /** 预览模式：把第一个合集的内容当作「游戏当前应用」的 mod */
@@ -83,6 +88,44 @@ function refreshUsedIn() {
   }
 }
 
+/** 预览模式：把最后两个工坊 mod 假装成「作者已下架」 */
+function mockChecks(): Record<string, { exists: boolean; checkedAt: number }> {
+  const now = Date.now();
+  const out: Record<string, { exists: boolean; checkedAt: number }> = {};
+  for (const m of state.mods) {
+    if (m.source === 'workshop') out[m.id] = { exists: true, checkedAt: now };
+    else if (m.steamworkshopid) out[m.steamworkshopid] = { exists: true, checkedAt: now };
+  }
+  for (const m of state.mods.filter((x) => x.source === 'workshop').slice(-2)) {
+    out[m.id] = { exists: false, checkedAt: now };
+  }
+  return out;
+}
+
+function isDelistedMock(checks: Record<string, { exists?: boolean }>, id?: string | null): boolean {
+  if (!id) return false;
+  const c = checks[id];
+  return !!c && c.exists === false;
+}
+
+/** 预览模式：假装有 3 个 mod 需要同步（最后一个是 Steam 还没下完的） */
+function mockWorkshopSync(): WorkshopSyncInfo {
+  const ws = state.mods.filter((m) => m.source === 'workshop').slice(0, 3);
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    available: true,
+    acfPath: '…\\steamapps\\workshop\\appworkshop_602960.acf',
+    reason: null,
+    items: ws.map((m, i) => ({
+      id: m.id,
+      name: m.name,
+      reason: i === 2 ? 'downloading' : 'update',
+      installedTime: now - 86400 * (30 - i),
+      latestTime: now - 86400 * 3
+    }))
+  };
+}
+
 /** 预览模式下的更新状态：没有安装包，直接告诉界面"不支持" */
 function mockUpdateState(): UpdateState {
   return {
@@ -110,11 +153,22 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
 
   scan: async (): Promise<ScanResult> => {
     refreshUsedIn();
+    const checks = mockChecks();
+    const localWsIds = new Set(
+      state.mods.filter((m) => m.source === 'local' && m.steamworkshopid).map((m) => m.steamworkshopid!)
+    );
     // 每次返回全新的数组/对象，跟真实后端 scanAll() 的行为一致。
     // 否则 useMemo 按引用比较会认为数据没变，界面不会重算 —— 比如更新完 mod 后
     // 「有更新」的数量不会往下掉。
     return {
-      mods: [...state.mods],
+      mods: state.mods.map((m) => ({
+        ...m,
+        delisted:
+          m.source === 'workshop'
+            ? isDelistedMock(checks, m.id)
+            : isDelistedMock(checks, m.steamworkshopid),
+        backedUpLocally: m.source === 'workshop' ? localWsIds.has(m.id) : true
+      })),
       modlists: summaries(),
       categories: {
         mods: { ...state.categories.mods },
@@ -124,8 +178,27 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       settings: { ...state.settings },
       warnings: [],
       applied: { available: true, reason: null, keys: appliedKeys(), missing: [] },
-      relations: { ...state.relations }
+      relations: { ...state.relations },
+      workshopSync: mockWorkshopSync(),
+      checksStale: false,
+      checksDelisted: Object.values(checks).filter((c) => c.exists === false).length,
+      checksUnknown: 0,
+      checksMode: state.apiKey ? 'apikey' : 'page',
+      checksCheckedAt: Date.now()
     };
+  },
+
+  refreshWorkshopChecks: async (): Promise<WorkshopCheckRefresh> => ({
+    checks: mockChecks(),
+    apiKeyError: null,
+    mode: 'page'
+  }),
+
+  // Steam Web API Key
+  getSteamApiKey: async (): Promise<string> => state.apiKey,
+  setSteamApiKey: async (key: string): Promise<string> => {
+    state.apiKey = String(key || '').trim();
+    return state.apiKey;
   },
 
   getModlist: async (fileName: string): Promise<ModlistFull | null> => {
@@ -234,7 +307,7 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
     return { freedBytes: 0, snapshotCount: 0, removedFromModlists };
   },
 
-  planWorkshopBackup: async (): Promise<BackupPlan> => {
+  planWorkshopBackup: async (scope?: string): Promise<BackupPlan> => {
     // 已经有本地副本的（按 steamworkshopid 认）算「更新」，和真实后端一致
     const localByWsId = new Map<string, ModInfo>();
     for (const m of state.mods) {
@@ -243,8 +316,12 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       }
     }
 
+    const checks = mockChecks();
+    const onlyDelisted = scope === 'delisted';
+
     const items = state.mods
       .filter((m) => m.source === 'workshop')
+      .filter((m) => !onlyDelisted || isDelistedMock(checks, m.id))
       .map((m, i) => {
         const local = localByWsId.get(m.id);
         return {
@@ -254,7 +331,9 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
           source: m.path,
           bytes: 32 * 1024 * 1024 + i * 1_500_000,
           files: 120 + i * 7,
-          existing: !!local
+          existing: !!local,
+          delisted: isDelistedMock(checks, m.id),
+          installedOnly: false
         };
       });
 
@@ -268,8 +347,8 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       newCount: items.length - updateCount
     };
   },
-  startWorkshopBackup: async (): Promise<BackupResult> => {
-    const plan = await mockApi.planWorkshopBackup();
+  startWorkshopBackup: async (scope?: string): Promise<BackupResult> => {
+    const plan = await mockApi.planWorkshopBackup(scope);
     // 预览模式把「更新已有本地副本」这一步做实：版本对齐、对比状态变为一致，
     // 这样界面上的「有更新」数量会真的往下掉，相关逻辑才测得到
     for (const item of plan.items) {
@@ -291,8 +370,17 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       skipped: []
     };
   },
-  cancelWorkshopBackup: async (): Promise<boolean> => true,
-  onBackupProgress: (_cb: (p: BackupProgress) => void): void => {},
+  cancelWorkshopBackup: async (): Promise<boolean> => true,  onBackupProgress: (_cb: (p: BackupProgress) => void): void => {},
+
+  // 同步工坊更新到游戏
+  planWorkshopSync: async (): Promise<WorkshopSyncInfo> => mockWorkshopSync(),
+  startWorkshopSync: async (): Promise<WorkshopSyncResult> => {
+    const plan = mockWorkshopSync();
+    const runnable = plan.items.filter((i) => i.reason !== 'downloading');
+    return { done: runnable.length, total: runnable.length, errors: [] };
+  },
+  cancelWorkshopSync: async (): Promise<boolean> => true,
+  onWorkshopSyncProgress: (_cb: (p: WorkshopSyncProgress) => void): void => {},
 
   // 预览模式：给一段示例描述，用来展示工坊描述的排版效果
   getWorkshopDetails: async (id: string): Promise<WorkshopDetails | null> => {

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { CategoryData, ModInfo } from '../types';
 import ModCard from './ModCard';
-import { IconAlert, IconSearch } from './Icons';
+import { IconAlert, IconDownload, IconSearch } from './Icons';
 import { categoryStyle } from '../categories';
 
 type SortKey = 'name' | 'name-desc' | 'ver' | 'mtime';
@@ -18,11 +18,14 @@ export default function LibraryView({
   mods,
   categories,
   onOpenMod,
+  onBackupDelisted,
   loading
 }: {
   mods: ModInfo[];
   categories: CategoryData;
   onOpenMod: (m: ModInfo) => void;
+  /** 一键备份已下架的 mod */
+  onBackupDelisted: () => void;
   loading: boolean;
 }) {
   const [q, setQ] = useState('');
@@ -30,6 +33,7 @@ export default function LibraryView({
   const [cat, setCat] = useState('全部');
   const [sort, setSort] = useState<SortKey>('name');
   const [onlyOutdated, setOnlyOutdated] = useState(false);
+  const [onlyDelisted, setOnlyDelisted] = useState(false);
 
   /*
    * 分类芯片和计数都只针对「当前来源」下的 mod。
@@ -61,6 +65,8 @@ export default function LibraryView({
     [sourceMods]
   );
 
+  const delistedCount = useMemo(() => sourceMods.filter((m) => m.delisted).length, [sourceMods]);
+
   /*
    * 筛选条件可能因为数据变化而「失效」：更新完就没有「有更新」的 mod 了，
    * 或者某个分类下的 mod 全被删了。这时对应的按钮会消失 —— 如果还继续套用这个条件，
@@ -71,6 +77,7 @@ export default function LibraryView({
   const effectiveCat =
     cat === '全部' || cat === UNCATEGORIZED || catList.includes(cat) ? cat : '全部';
   const effectiveOnlyOutdated = onlyOutdated && outdatedCount > 0;
+  const effectiveOnlyDelisted = onlyDelisted && delistedCount > 0;
 
   useEffect(() => {
     // UNCATEGORIZED 是个虚拟分类，不在 catList 里，别把它当成失效条件重置掉
@@ -81,6 +88,10 @@ export default function LibraryView({
     if (onlyOutdated && outdatedCount === 0) setOnlyOutdated(false);
   }, [onlyOutdated, outdatedCount]);
 
+  useEffect(() => {
+    if (onlyDelisted && delistedCount === 0) setOnlyDelisted(false);
+  }, [onlyDelisted, delistedCount]);
+
   const filtered = useMemo(() => {
     let out = mods;
     if (source !== 'all') out = out.filter((m) => m.source === source);
@@ -90,6 +101,7 @@ export default function LibraryView({
         (m) => m.categories.includes(effectiveCat) || m.autoCategories.includes(effectiveCat)
       );
     if (effectiveOnlyOutdated) out = out.filter((m) => m.counterpart?.status === 'older');
+    if (effectiveOnlyDelisted) out = out.filter((m) => m.delisted);
     const ql = q.trim().toLowerCase();
     if (ql) {
       out = out.filter(
@@ -118,7 +130,7 @@ export default function LibraryView({
         break;
     }
     return sorted;
-  }, [mods, source, effectiveCat, effectiveOnlyOutdated, q, sort]);
+  }, [mods, source, effectiveCat, effectiveOnlyOutdated, effectiveOnlyDelisted, q, sort]);
 
   const localCount = mods.filter((m) => m.source === 'local').length;
   const wsCount = mods.filter((m) => m.source === 'workshop').length;
@@ -158,6 +170,28 @@ export default function LibraryView({
           >
             <IconAlert size={13} />
             有更新 {outdatedCount}
+          </button>
+        )}
+
+        {delistedCount > 0 && (
+          <button
+            className={`btn sm delisted-chip ${effectiveOnlyDelisted ? 'primary' : ''}`}
+            onClick={() => setOnlyDelisted((v) => !v)}
+            title="只看已被作者从创意工坊下架的 mod —— 工坊上再也下不到了，建议备份到本地"
+          >
+            <IconAlert size={13} />
+            已下架 {delistedCount}
+          </button>
+        )}
+
+        {effectiveOnlyDelisted && (
+          <button
+            className="btn sm primary"
+            onClick={() => onBackupDelisted()}
+            title="把这些已下架的 mod 复制进 LocalMods，之后不依赖工坊和 Steam"
+          >
+            <IconDownload size={13} />
+            一键备份这些
           </button>
         )}
 

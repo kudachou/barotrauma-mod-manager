@@ -4,6 +4,7 @@ const path = require('node:path');
 const { copyDir, dirStats, sanitizeName, uniqueName, stamp, parseStamp, rmrf } = require('./fsutil');
 const { scanDir, stripBom } = require('./mods');
 const { xmlEscape } = require('./modlists');
+const { readWorkshopAcf, installTimeOf, isDelisted } = require('./workshopsync');
 
 /**
  * 快照与备份
@@ -218,15 +219,30 @@ function deleteLocalModFiles(settings, modName) {
 
 /* --------------------------- 工坊 mod 备份 --------------------------- */
 
-/** 优先用游戏实际加载的那份（Installed），没有就退回 Steam 订阅目录 */
-function pickWorkshopSource(settings, id) {
-  const candidates = [
-    settings.installedWorkshopDir ? path.join(settings.installedWorkshopDir, id) : null,
-    settings.workshopModsDir ? path.join(settings.workshopModsDir, id) : null
-  ];
-  for (const c of candidates) {
-    if (c && fs.existsSync(path.join(c, 'filelist.xml'))) return c;
+/**
+ * 挑一份用来备份的工坊内容。
+ *
+ * 默认用游戏实际加载的那份（Installed），但如果工坊已经有更新、而游戏还没同步过去，
+ * 那份就是旧的 —— 这时必须改用 Steam 订阅目录，否则会备份到过期内容。
+ * 判断依据是 Steam .acf 里的 latest_timeupdated 与游戏写的 installtime 之比。
+ */
+function pickWorkshopSource(settings, id, acf) {
+  const inst = settings.installedWorkshopDir
+    ? path.join(settings.installedWorkshopDir, id)
+    : null;
+  const steam = settings.workshopModsDir ? path.join(settings.workshopModsDir, id) : null;
+  const okInst = inst && fs.existsSync(path.join(inst, 'filelist.xml'));
+  const okSteam = steam && fs.existsSync(path.join(steam, 'filelist.xml'));
+
+  if (okInst && okSteam) {
+    const entry = acf && acf.items ? acf.items[id] : null;
+    const latest = entry && (entry.latestTimeUpdated || entry.timeUpdated);
+    const installed = installTimeOf(inst);
+    if (latest && installed && latest > installed) return steam;
+    return inst;
   }
+  if (okInst) return inst;
+  if (okSteam) return steam;
   return null;
 }
 
@@ -235,10 +251,23 @@ function pickWorkshopSource(settings, id) {
  * 已经存在本地副本的（靠 steamworkshopid 认）会原地更新，并先留快照；
  * 其余按 mod 名新建文件夹。
  */
-function planWorkshopBackup(settings, hooks = {}) {
+function planWorkshopBackup(settings, hooks = {}, options = {}) {
   const { onStep = () => {} } = hooks;
-  const workshop = scanDir('workshop', settings.workshopModsDir);
+  const { onlyDelisted = false, checks = {} } = options;
+
+  /*
+   * 来源集合 = Steam 订阅目录 ∪ 游戏 Installed。
+   * 已下架的 mod 可能只剩其中一边有副本（甚至只剩 Installed），少扫一边就会漏掉 ——
+   * 而恰恰是这些"工坊上已经没了"的 mod 最需要备份。
+   */
+  const byId = new Map();
+  for (const m of scanDir('workshop', settings.installedWorkshopDir)) byId.set(m.id, m);
+  for (const m of scanDir('workshop', settings.workshopModsDir)) byId.set(m.id, m);
+  const workshop = Array.from(byId.values()).filter(
+    (m) => !onlyDelisted || isDelisted(checks, m.id)
+  );
   const local = scanDir('local', settings.localModsDir);
+  const acf = readWorkshopAcf(settings.workshopModsDir);
 
   const existingByWsId = new Map();
   const takenNames = new Set();
@@ -261,13 +290,28 @@ function planWorkshopBackup(settings, hooks = {}) {
     const w = workshop[i];
     onStep(i + 1, workshop.length, w.name || w.id);
 
-    const source = pickWorkshopSource(settings, w.id);
+    const source = pickWorkshopSource(settings, w.id, acf);
     if (!source) {
       skipped.push({ id: w.id, name: w.name || w.id, reason: '游戏还没安装这个 mod' });
       continue;
     }
 
     const existingFolder = existingByWsId.get(w.id) || null;
+
+    /*
+     * 「只备份已下架的」默认跳过已经备份过的。
+     * 本地副本已经在，说明这个 mod 早就救下来了；再复制一次只会覆盖掉
+     * 用户自己改过的东西（这些 mod 恰恰经常被自改）。
+     */
+    if (onlyDelisted && existingFolder) {
+      skipped.push({
+        id: w.id,
+        name: w.name || w.id,
+        reason: `已备份到本地（${existingFolder}），跳过以免覆盖你改过的副本`
+      });
+      continue;
+    }
+
     let folder = existingFolder;
     if (folder) {
       updateCount++;
@@ -295,7 +339,11 @@ function planWorkshopBackup(settings, hooks = {}) {
       source,
       bytes,
       files,
-      existing: !!existingFolder
+      existing: !!existingFolder,
+      // 已下架：工坊上已经没有这个条目了
+      delisted: isDelisted(checks, w.id),
+      // 仅剩游戏里的副本（Steam 订阅目录里已经没有）
+      installedOnly: !fs.existsSync(path.join(settings.workshopModsDir || '', w.id, 'filelist.xml'))
     });
   }
 

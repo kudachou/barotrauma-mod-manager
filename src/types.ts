@@ -35,6 +35,14 @@ export interface ModInfo {
   mtime: number | null;
   /** 该 mod 被哪些合集启用（合集名数组） */
   usedIn: string[];
+  /** 工坊上已经没有这个条目了（作者下架或被删）。本地 mod 表示它的工坊来源已下架 */
+  delisted?: boolean;
+  /** 判定依据：'apikey'=官方接口确认下架；'page-invisible'=只知道工坊上看不到（也可能是私有） */
+  delistedHow?: string | null;
+  /** 只剩游戏 Installed 里那份副本，Steam 订阅目录里已经没有 */
+  installedOnly?: boolean;
+  /** LocalMods 里已经有一份对应的备份（工坊 mod 才看这个） */
+  backedUpLocally?: boolean;
 }
 
 export interface ModlistEntry {
@@ -75,6 +83,15 @@ export interface CategoryData {
   removed: string[];
 }
 
+/** 一次「工坊下架检查」的结果 */
+export interface WorkshopCheckRefresh {
+  checks: Record<string, { exists?: boolean | null; how?: string; checkedAt?: number }>;
+  /** API Key 不可用时的报错（有 Key 但被拒） */
+  apiKeyError: string | null;
+  /** 实际用的方式 */
+  mode: 'apikey' | 'page';
+}
+
 /** 当前游戏实际生效的 mod（读自 config_player.xml） */
 export interface AppliedInfo {
   /** 能不能读到 config_player.xml */
@@ -84,6 +101,44 @@ export interface AppliedInfo {
   keys: string[];
   /** 在生效列表里、但当前目录找不到的（被删了或没装） */
   missing: string[];
+}
+
+/** 待同步到游戏的工坊 mod */
+export interface WorkshopSyncItem {
+  id: string;
+  name: string;
+  /**
+   * update      = 工坊有新版、Steam 已下好，游戏里还是旧的
+   * downloading = 工坊有新版但 Steam 还没下完（这时不能同步）
+   * missing     = 已订阅但 Installed 里还没有
+   * delisted    = 已被作者下架（工坊上没有了，不能同步，只能备份）
+   */
+  reason: 'update' | 'downloading' | 'missing' | 'delisted';
+  /** 游戏里那份的 installtime */
+  installedTime: number | null;
+  latestTime: number | null;
+}
+
+/** 「工坊更新 vs 游戏里的副本」的状态 */
+export interface WorkshopSyncInfo {
+  available: boolean;
+  acfPath: string | null;
+  reason: string | null;
+  items: WorkshopSyncItem[];
+}
+
+export interface WorkshopSyncProgress {
+  phase: 'copying' | 'done';
+  done: number;
+  total: number;
+  current?: string | null;
+  errors?: number;
+}
+
+export interface WorkshopSyncResult {
+  done: number;
+  total: number;
+  errors: { id: string; name: string; message: string }[];
 }
 
 export interface ScanResult {
@@ -97,6 +152,18 @@ export interface ScanResult {
   applied: AppliedInfo;
   /** `${source}:${id}` -> 关联的 mod 标识（一般是前置需求） */
   relations: Record<string, string[]>;
+  /** 工坊更新与游戏副本的差异 */
+  workshopSync: WorkshopSyncInfo;
+  /** 「工坊条目还在不在」的缓存太旧，界面该去刷一次 */
+  checksStale?: boolean;
+  /** 已核实为下架的条目数 */
+  checksDelisted?: number;
+  /** 没能核实的条目数（Steam 挡住时会有） */
+  checksUnknown?: number;
+  /** 检查方式：'apikey' 走官方接口（更可靠），'page' 抓工坊网页 */
+  checksMode?: 'apikey' | 'page';
+  /** 上次检查的时间戳 */
+  checksCheckedAt?: number;
 }
 
 export type ViewKey = 'library' | 'collections' | 'settings';
@@ -189,6 +256,10 @@ export interface BackupPlanItem {
   files: number;
   /** 已有本地副本 → 会先留快照再更新 */
   existing: boolean;
+  /** 工坊上已下架 */
+  delisted?: boolean;
+  /** 只剩游戏里的副本 */
+  installedOnly?: boolean;
 }
 
 export interface BackupPlan {

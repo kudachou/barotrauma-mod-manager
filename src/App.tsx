@@ -18,6 +18,7 @@ import SettingsView from './components/SettingsView';
 import ModDetailModal from './components/ModDetailModal';
 import UpdateBanner from './components/UpdateBanner';
 import BackupModal from './components/BackupModal';
+import SyncModal from './components/SyncModal';
 import Toasts, { type ToastItem } from './components/Toasts';
 import { IconAlert, IconDownload, IconPlay, IconRefresh } from './components/Icons';
 
@@ -36,6 +37,8 @@ export default function App() {
   const [reloadToken, setReloadToken] = useState(0);
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [backupOpen, setBackupOpen] = useState(false);
+  const [backupScope, setBackupScope] = useState<'all' | 'delisted'>('all');
+  const [syncOpen, setSyncOpen] = useState(false);
   /** 用户点了「稍后」的版本号，同一个版本不再弹 */
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const toastSeq = useRef(0);
@@ -66,6 +69,93 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  /**
+   * 「工坊条目还在不在」的缓存太旧时后台刷一次。
+   * 扫描本身不联网（读缓存），所以这里补一次网络检查。
+   * 结果要明确告诉用户 —— 不然检查失败时功能会静默失效，看不出来。
+   */
+  const checksRefreshed = useRef(false);
+  useEffect(() => {
+    if (!data?.checksStale || checksRefreshed.current) return;
+    checksRefreshed.current = true;
+    void (async () => {
+      try {
+        const r = await api.refreshWorkshopChecks();
+        await refresh();
+        const list = Object.values(r.checks || {});
+        const gone = list.filter((c) => c.exists === false).length;
+        const unknown = list.filter((c) => c.exists === null).length;
+        if (r.apiKeyError) {
+          pushToast('err', 'API Key 不可用，已退回网页检查', r.apiKeyError);
+        } else if (gone > 0) {
+          pushToast('warn', `发现 ${gone} 个 mod 已被工坊下架`, '点工具栏「已下架」查看');
+        } else if (unknown > 0) {
+          pushToast(
+            'info',
+            '下架检查没能全部完成',
+            `有 ${unknown} 个条目没查到（成人内容需要登录才能看）—— 在设置里填个 Steam API Key 就能可靠检查`
+          );
+        }
+      } catch {
+        /* 离线或接口出错就保持现状 */
+      }
+    })();
+  }, [data?.checksStale, refresh, pushToast]);
+
+  /** 手动重跑下架检查（Steam 挡住自动检查时的补救） */
+  const [checkingWorkshop, setCheckingWorkshop] = useState(false);
+  const recheckWorkshop = useCallback(async () => {
+    setCheckingWorkshop(true);
+    try {
+      const r = await api.refreshWorkshopChecks();
+      await refresh();
+      const list = Object.values(r.checks || {});
+      const gone = list.filter((c) => c.exists === false).length;
+      const unknown = list.filter((c) => c.exists === null).length;
+      if (r.apiKeyError) {
+        pushToast('err', 'API Key 不可用', `${r.apiKeyError}（已退回网页检查）`);
+        return;
+      }
+      pushToast(
+        gone > 0 ? 'warn' : 'ok',
+        gone > 0 ? `发现 ${gone} 个 mod 已被工坊下架` : '检查完成，没有发现被下架的 mod',
+        unknown > 0
+          ? `另有 ${unknown} 个条目没能核实（成人内容需登录）—— 填个 Steam API Key 就能可靠检查`
+          : r.mode === 'apikey'
+            ? '通过官方 API 检查'
+            : '通过工坊网页检查'
+      );
+    } catch (e: any) {
+      pushToast('err', '下架检查失败', String(e?.message || e));
+    } finally {
+      setCheckingWorkshop(false);
+    }
+  }, [refresh, pushToast]);
+
+  /** Steam Web API Key（有就走官方接口，没有就抓网页） */
+  const [steamApiKey, setSteamApiKeyState] = useState('');
+  useEffect(() => {
+    void (async () => {
+      try {
+        setSteamApiKeyState((await api.getSteamApiKey()) || '');
+      } catch {
+        /* 读不到就当没填 */
+      }
+    })();
+  }, []);
+  const saveSteamApiKey = useCallback(
+    async (key: string) => {
+      try {
+        const saved = await api.setSteamApiKey(key);
+        setSteamApiKeyState(saved);
+        pushToast('ok', saved ? '已保存 API Key' : '已清空 API Key', saved ? '下次检查会走官方接口' : '将退回抓网页的方式');
+      } catch (e: any) {
+        pushToast('err', '保存失败', String(e?.message || e));
+      }
+    },
+    [pushToast]
+  );
 
   useEffect(() => {
     api.onPreviewReady((p: { id: string; localPath: string | null }) => {
@@ -136,6 +226,10 @@ export default function App() {
   const mods = data?.mods || [];
   const modlists = data?.modlists || [];
   const categories = data?.categories || { mods: {}, custom: [], removed: [] };
+  /** 可以同步到游戏的工坊更新数量（Steam 没下完的、已下架的都不算） */
+  const syncPending = (data?.workshopSync?.items || []).filter(
+    (i) => i.reason !== 'downloading' && i.reason !== 'delisted'
+  ).length;
 
   const allCategories = useMemo(() => {
     const removed = categories.removed || [];
@@ -228,8 +322,7 @@ export default function App() {
     [pushToast]
   );
 
-  /** 保存 mod 之间的关联（前置需求） */
-  const setRelations = useCallback(
+  /** 保存 mod 之间的关联（前置需求） */  const setRelations = useCallback(
     async (key: string, keys: string[]) => {
       try {
         const next = await api.setRelations(key, keys);
@@ -352,8 +445,19 @@ export default function App() {
           </div>
           <span className="spacer" />
           <button
+            className={`btn ${syncPending > 0 ? 'attention' : ''}`}
+            onClick={() => setSyncOpen(true)}
+            title="把工坊更新搬进游戏的 WorkshopMods\Installed，不用启动游戏"
+          >
+            <IconDownload size={15} />
+            同步到游戏{syncPending > 0 ? ` ${syncPending}` : ''}
+          </button>
+          <button
             className="btn"
-            onClick={() => setBackupOpen(true)}
+            onClick={() => {
+              setBackupScope('all');
+              setBackupOpen(true);
+            }}
             title="把所有创意工坊 mod 复制一份到 LocalMods"
           >
             <IconDownload size={15} />
@@ -395,6 +499,10 @@ export default function App() {
               categories={categories}
               loading={loading && !data}
               onOpenMod={setSelected}
+              onBackupDelisted={() => {
+                setBackupScope('delisted');
+                setBackupOpen(true);
+              }}
             />
           )}
 
@@ -418,6 +526,16 @@ export default function App() {
               onCheckUpdate={checkUpdate}
               onDownloadUpdate={downloadUpdate}
               onInstallUpdate={installUpdate}
+              workshopCheck={{
+                delisted: data.checksDelisted || 0,
+                unknown: data.checksUnknown || 0,
+                lastAt: data.checksCheckedAt || 0,
+                checking: checkingWorkshop,
+                mode: data.checksMode || 'page',
+                apiKey: steamApiKey
+              }}
+              onRecheckWorkshop={recheckWorkshop}
+              onSaveApiKey={saveSteamApiKey}
             />
           )}
         </div>
@@ -445,7 +563,17 @@ export default function App() {
 
       {backupOpen && (
         <BackupModal
+          scope={backupScope}
           onClose={() => setBackupOpen(false)}
+          onToast={pushToast}
+          onDone={refresh}
+        />
+      )}
+
+      {syncOpen && (
+        <SyncModal
+          initial={data?.workshopSync || null}
+          onClose={() => setSyncOpen(false)}
           onToast={pushToast}
           onDone={refresh}
         />

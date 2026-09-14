@@ -74,7 +74,10 @@ export default function SettingsView({
   update,
   onCheckUpdate,
   onDownloadUpdate,
-  onInstallUpdate
+  onInstallUpdate,
+  workshopCheck,
+  onRecheckWorkshop,
+  onSaveApiKey
 }: {
   settings: AppSettings;
   onSave: (s: AppSettings) => Promise<void>;
@@ -83,8 +86,23 @@ export default function SettingsView({
   onCheckUpdate: () => Promise<void>;
   onDownloadUpdate: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
+  /** 工坊下架检查的状态 */
+  workshopCheck: {
+    delisted: number;
+    unknown: number;
+    lastAt: number;
+    checking: boolean;
+    mode: 'apikey' | 'page';
+    apiKey: string;
+  };
+  onRecheckWorkshop: () => Promise<void>;
+  onSaveApiKey: (key: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<AppSettings>(settings);
+  const [apiKeyDraft, setApiKeyDraft] = useState(workshopCheck.apiKey);
+  useEffect(() => {
+    setApiKeyDraft(workshopCheck.apiKey);
+  }, [workshopCheck.apiKey]);
   const [exists, setExists] = useState<Record<string, boolean | undefined>>({});
   const [saving, setSaving] = useState(false);
 
@@ -286,6 +304,94 @@ export default function SettingsView({
             </div>
           </>
         )}
+
+        {/* 工坊下架检查：联网逐个核实条目还在不在。
+            成人内容的 mod 匿名访问时 Steam 要求登录，所以推荐填个官方 API Key。 */}
+        <div className="panel">
+          <h3>创意工坊下架检查</h3>
+          <div className="hint" style={{ marginBottom: 14 }}>
+            作者下架之后，本地文件看不出任何区别（Steam 的 .acf 记录和正常 mod 一模一样），
+            只能联网核实。当前方式：
+            {workshopCheck.mode === 'apikey' ? (
+              <b style={{ color: '#6ee7b7' }}> 官方 API（可靠）</b>
+            ) : (
+              <b style={{ color: '#fcd34d' }}> 抓工坊网页（尽力而为）</b>
+            )}
+          </div>
+
+          <div
+            className="bk-stats"
+            style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginBottom: 14 }}
+          >
+            <div className="bk-stat">
+              <div className="bk-num">{workshopCheck.delisted}</div>
+              <div className="bk-label">已下架</div>
+            </div>
+            <div className="bk-stat">
+              <div className="bk-num">{workshopCheck.unknown}</div>
+              <div className="bk-label">没能核实</div>
+            </div>
+          </div>
+
+          {workshopCheck.mode !== 'apikey' && (
+            <div className="warn-bar" style={{ marginBottom: 14 }}>
+              <IconAlert size={16} />
+              <div>
+                不填 API Key 时只能抓工坊网页，而网页<b>分不清「已下架」和「私有」</b> ——
+                作者（或你自己）设成私有的条目，匿名访问同样是错误页。
+                所以那种结果只会标成「工坊不可见」，不敢断言已下架。
+                填个 Key 走官方接口就能准确区分，也更快。
+              </div>
+            </div>
+          )}
+
+          <div className="path-row" style={{ marginBottom: 0 }}>
+            <label>Steam Web API Key</label>
+            <div className="path-line">
+              <input
+                className="input"
+                placeholder="留空 = 用抓网页的方式"
+                value={apiKeyDraft}
+                onChange={(e) => setApiKeyDraft(e.target.value)}
+              />
+              <button className="btn" onClick={() => void onSaveApiKey(apiKeyDraft)}>
+                <IconSave size={14} />
+                保存
+              </button>
+              <button
+                className="btn"
+                onClick={() => void api.openExternal('https://steamcommunity.com/dev/apikey')}
+              >
+                <IconExternal size={14} />
+                去申请
+              </button>
+            </div>
+            <div className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+              免费申请，域名随便填（比如 localhost）。Key 只存在本机的
+              <code> steam-api-key.json</code>，不会上传到任何地方。
+            </div>
+          </div>
+
+          <div className="hint" style={{ marginBottom: 12 }}>
+            上次检查：
+            {workshopCheck.lastAt
+              ? new Date(workshopCheck.lastAt).toLocaleString('zh-CN')
+              : '还没查过'}
+            {workshopCheck.unknown > 0 &&
+              ' —— 没核实出来的既不会显示成「已下架」，也不会被当成正常'}
+          </div>
+
+          <div className="btn-row">
+            <button
+              className="btn primary"
+              onClick={onRecheckWorkshop}
+              disabled={workshopCheck.checking}
+            >
+              <IconRefresh size={15} />
+              {workshopCheck.checking ? '检查中…' : '重新检查'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

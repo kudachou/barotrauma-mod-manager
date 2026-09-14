@@ -29,6 +29,17 @@ const {
   removeRelations
 } = require('./relations');
 const {
+  planWorkshopSync,
+  runWorkshopSync,
+  readWorkshopAcf,
+  installTimeOf,
+  readChecks,
+  checksStale,
+  refreshChecks,
+  isDelisted
+} = require('./workshopsync');
+const { getApiKey, setApiKey } = require('./apikey');
+const {
   listSnapshots,
   snapshotSummary,
   createSnapshot,
@@ -129,6 +140,17 @@ function readAllModlists(dir, appliedKeys) {
   return { summaries, usedIn };
 }
 
+/** 需要检查「工坊条目还在不在」的所有 ID */
+function collectCheckIds(s) {
+  const ids = new Set();
+  for (const m of scanDir('workshop', s.workshopModsDir)) ids.add(m.id);
+  for (const m of scanDir('workshop', s.installedWorkshopDir)) ids.add(m.id);
+  for (const m of scanDir('local', s.localModsDir)) {
+    if (m.steamworkshopid) ids.add(m.steamworkshopid);
+  }
+  return Array.from(ids);
+}
+
 function scanAll() {
   const s = getSettings();
   const warnings = [];
@@ -140,7 +162,12 @@ function scanAll() {
 
   const local = scanDir('local', s.localModsDir);
   const workshop = scanDir('workshop', s.workshopModsDir);
-  attachCounterparts(local, workshop, s.installedWorkshopDir);
+  // 游戏 Installed 里有、但 Steam 订阅目录里已经没有的副本（作者下架后残留的）
+  const installedOnly = scanDir('workshop', s.installedWorkshopDir).filter(
+    (m) => !workshop.some((w) => w.id === m.id)
+  );
+  for (const m of installedOnly) m.installedOnly = true;
+  attachCounterparts(local, [...workshop, ...installedOnly], s.installedWorkshopDir);
 
   const cats = getCategories();
   const removed = cats.removed || [];
@@ -160,7 +187,12 @@ function scanAll() {
 
   const { summaries, usedIn } = readAllModlists(s.modListsDir, appliedKeys);
 
-  const mods = [...workshop, ...local];
+  // 下架状态读缓存（不联网）；联网刷新是单独的 IPC，由界面按需触发
+  const checks = readChecks(userDataDir());
+
+  const mods = [...workshop, ...installedOnly, ...local];
+  // 哪些工坊 mod 已经有一份对应的本地副本（= 已经备份过了）
+  const localWsIds = new Set(local.map((m) => m.steamworkshopid).filter(Boolean));
   for (const m of mods) {
     const key = `${m.source}:${m.id}`;
     m.categories = Array.isArray(cats.mods[key]) ? [...cats.mods[key]] : [];
@@ -169,6 +201,14 @@ function scanAll() {
     m.preview =
       m.source === 'workshop' ? cachedPreview(m.id, previewDir) : findCover(key);
     m.usedIn = usedIn.get(key) || [];
+    // 工坊 mod：条目本身还在不在；本地 mod：它对应的工坊来源还在不在
+    const entry = m.source === 'workshop' ? checks[m.id] : checks[m.steamworkshopid];
+    m.delisted = isDelisted(checks, m.source === 'workshop' ? m.id : m.steamworkshopid);
+    // 判定依据：'apikey' = 官方接口确认下架；'page-invisible' = 抓网页只知道「工坊上看不到」，
+    // 也可能只是作者把它设成了私有（实测这种误判真的会发生）
+    m.delistedHow = m.delisted && entry ? entry.how || null : null;
+    // 工坊 mod：本地是否已经有一份备份（有的话就不算"有风险"）
+    m.backedUpLocally = m.source === 'workshop' ? localWsIds.has(m.id) : true;
   }
 
   // 生效列表里有、但当前目录找不到的（被删了或者没装）
@@ -185,6 +225,13 @@ function scanAll() {
     missing: appliedMissing
   };
 
+  const checkValues = Object.values(checks);
+  const checkIds = [
+    ...workshop.map((m) => m.id),
+    ...installedOnly.map((m) => m.id),
+    ...local.map((m) => m.steamworkshopid).filter(Boolean)
+  ];
+
   return {
     mods,
     modlists: summaries,
@@ -192,7 +239,17 @@ function scanAll() {
     settings: s,
     warnings,
     applied,
-    relations: getRelations(userDataDir())
+    relations: getRelations(userDataDir()),
+    workshopSync: planWorkshopSync(s, checks),
+    // 缓存太旧就让界面去刷一次（不阻塞扫描）
+    checksStale: checksStale(checks, checkIds),
+    /** 已核实为下架的数量 */
+    checksDelisted: checkValues.filter((c) => c && c.exists === false).length,
+    /** 没能核实的数量（Steam 挡住时会有） */
+    checksUnknown: checkValues.filter((c) => c && c.exists === null).length,
+    /** 检查方式：有 API Key 走官方接口，没有就抓网页 */
+    checksMode: getApiKey(userDataDir()) ? 'apikey' : 'page',
+    checksCheckedAt: checkValues.reduce((max, c) => Math.max(max, (c && c.checkedAt) || 0), 0)
   };
 }
 
@@ -340,6 +397,18 @@ function registerIpc() {
   ipcMain.handle('workshop:details', (_e, id, force) =>
     getWorkshopDetails(id, path.join(userDataDir(), 'workshop'), { force: !!force })
   );
+
+  /** 联网刷新「工坊条目还在不在」的缓存（作者下架后就查不到了） */
+  ipcMain.handle('workshop:refreshChecks', () =>
+    refreshChecks(userDataDir(), collectCheckIds(getSettings()), {
+      apiKey: getApiKey(userDataDir())
+    })
+  );
+
+  /* ---------------------- Steam Web API Key ---------------------- */
+
+  ipcMain.handle('steam:getApiKey', () => getApiKey(userDataDir()));
+  ipcMain.handle('steam:setApiKey', (_e, key) => setApiKey(userDataDir(), key));
 
   ipcMain.handle('cover:set', async (_e, sourceId, imagePath) => {    const key = String(sourceId || '');
     if (!key) return null;
@@ -524,16 +593,21 @@ function registerIpc() {
   let backupRunning = false;
   let backupCancelled = false;
 
-  const measure = (sender) =>
-    planWorkshopBackup(getSettings(), {
-      onStep: (done, total, current) =>
-        send(sender, 'backup:progress', { phase: 'planning', done, total, current })
-    });
+  /** scope='delisted' 时只备份「工坊上已经下架」的那些 */
+  const measure = (sender, scope) =>
+    planWorkshopBackup(
+      getSettings(),
+      {
+        onStep: (done, total, current) =>
+          send(sender, 'backup:progress', { phase: 'planning', done, total, current })
+      },
+      { onlyDelisted: scope === 'delisted', checks: readChecks(userDataDir()) }
+    );
 
   /** 只算不复制：给出数量与总体积，让用户决定要不要执行 */
-  ipcMain.handle('backup:plan', (event) => measure(event.sender));
+  ipcMain.handle('backup:plan', (event, scope) => measure(event.sender, scope));
 
-  ipcMain.handle('backup:start', (event) => {
+  ipcMain.handle('backup:start', (event, scope) => {
     if (backupRunning) throw new Error('已有备份任务在进行中');
     const s = getSettings();
     const sender = event.sender;
@@ -541,7 +615,7 @@ function registerIpc() {
     backupRunning = true;
     backupCancelled = false;
     try {
-      const plan = measure(sender);
+      const plan = measure(sender, scope);
       return runWorkshopBackup(s, plan, {
         onProgress: (p) => send(sender, 'backup:progress', p),
         isCancelled: () => backupCancelled
@@ -553,6 +627,40 @@ function registerIpc() {
 
   ipcMain.handle('backup:cancel', () => {
     backupCancelled = true;
+    return true;
+  });
+
+  /* ---------------------- 同步工坊更新到游戏 ---------------------- */
+
+  let syncRunning = false;
+  let syncCancelled = false;
+
+  ipcMain.handle('workshopsync:plan', () => planWorkshopSync(getSettings(), readChecks(userDataDir())));
+
+  ipcMain.handle('workshopsync:start', (event) => {
+    if (syncRunning) throw new Error('已有同步任务在进行中');
+    const s = getSettings();
+    const sender = event.sender;
+
+    syncRunning = true;
+    syncCancelled = false;
+    try {
+      const plan = planWorkshopSync(s, readChecks(userDataDir()));
+      // 'downloading'（Steam 没下完）和 'delisted'（工坊上已经没了）都不能搬
+      const runnable = plan.items.filter(
+        (i) => i.reason !== 'downloading' && i.reason !== 'delisted'
+      );
+      return runWorkshopSync(s, runnable, {
+        onProgress: (p) => send(sender, 'workshopsync:progress', p),
+        isCancelled: () => syncCancelled
+      });
+    } finally {
+      syncRunning = false;
+    }
+  });
+
+  ipcMain.handle('workshopsync:cancel', () => {
+    syncCancelled = true;
     return true;
   });
 
