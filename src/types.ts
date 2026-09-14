@@ -47,6 +47,8 @@ export interface ModlistSummary {
   fileName: string;
   name: string;
   count: number;
+  /** 内容与当前游戏生效的一致 */
+  matchesApplied?: boolean;
 }
 
 export interface ModlistFull {
@@ -73,6 +75,17 @@ export interface CategoryData {
   removed: string[];
 }
 
+/** 当前游戏实际生效的 mod（读自 config_player.xml） */
+export interface AppliedInfo {
+  /** 能不能读到 config_player.xml */
+  available: boolean;
+  reason: string | null;
+  /** 形如 `workshop:123` / `local:名字`，按游戏里的加载顺序 */
+  keys: string[];
+  /** 在生效列表里、但当前目录找不到的（被删了或没装） */
+  missing: string[];
+}
+
 export interface ScanResult {
   mods: ModInfo[];
   modlists: ModlistSummary[];
@@ -80,6 +93,10 @@ export interface ScanResult {
   settings: AppSettings;
   /** 路径校验结果 */
   warnings: string[];
+  /** 游戏当前生效的 mod */
+  applied: AppliedInfo;
+  /** `${source}:${id}` -> 关联的 mod 标识（一般是前置需求） */
+  relations: Record<string, string[]>;
 }
 
 export type ViewKey = 'library' | 'collections' | 'settings';

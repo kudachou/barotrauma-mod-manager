@@ -14,7 +14,8 @@ import type {
   LocalModFootprint,
   DeleteLocalModResult,
   WorkshopDetails,
-  ModInfo
+  ModInfo,
+  AppliedInfo
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -37,11 +38,36 @@ let state = {
   mods: scan.mods.map((m) => ({ ...m })),
   modlists: JSON.parse(JSON.stringify(mockModlists)) as ModlistFull[],
   categories: JSON.parse(JSON.stringify(mockCategories)) as CategoryData,
-  settings: { ...mockSettings }
+  settings: { ...mockSettings },
+  // 预览模式给一组示例关联：整合包依赖 LuaCs 框架
+  relations: {
+    'workshop:3100128373': ['workshop:2559634234', 'workshop:2683570256']
+  } as Record<string, string[]>
 };
 
+/** 预览模式：把第一个合集的内容当作「游戏当前应用」的 mod */
+function appliedKeys(): string[] {
+  const first = state.modlists[0];
+  if (!first) return [];
+  return first.entries.map((e) =>
+    e.type === 'workshop' ? `workshop:${e.id}` : `local:${e.name}`
+  );
+}
+
 function summaries(): ModlistSummary[] {
-  return state.modlists.map((l) => ({ fileName: l.fileName, name: l.name, count: l.entries.length }));
+  const keys = appliedKeys();
+  const set = new Set(keys);
+  return state.modlists.map((l) => {
+    const own = l.entries.map((e) =>
+      e.type === 'workshop' ? `workshop:${e.id}` : `local:${e.name}`
+    );
+    return {
+      fileName: l.fileName,
+      name: l.name,
+      count: l.entries.length,
+      matchesApplied: keys.length > 0 && own.length === set.size && own.every((k) => set.has(k))
+    };
+  });
 }
 
 function refreshUsedIn() {
@@ -96,7 +122,9 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
         removed: [...state.categories.removed]
       },
       settings: { ...state.settings },
-      warnings: []
+      warnings: [],
+      applied: { available: true, reason: null, keys: appliedKeys(), missing: [] },
+      relations: { ...state.relations }
     };
   },
 
@@ -366,6 +394,16 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
     // 重新创建同名标签 → 从「已删除」里拿回来
     state.categories.removed = state.categories.removed.filter((x) => x !== n);
     return state.categories;
+  },
+  /** 关联 mod（前置需求） */
+  setRelations: async (key: string, keys: string[]): Promise<Record<string, string[]>> => {
+    const k = (key || '').trim();
+    const list = Array.from(new Set((keys || []).map((x) => (x || '').trim()).filter((x) => x && x !== k)));
+    const next = { ...state.relations };
+    if (list.length) next[k] = list;
+    else delete next[k];
+    state.relations = next;
+    return { ...next };
   },
   /** 删除标签：从自定义列表与所有 mod 上移除，并记入 removed */
   deleteCategory: async (

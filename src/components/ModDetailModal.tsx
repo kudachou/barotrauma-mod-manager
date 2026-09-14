@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   LocalModFootprint,
   ModInfo,
@@ -22,6 +22,7 @@ import {
   IconImage,
   IconPlus,
   IconRefresh,
+  IconSearch,
   IconTrash
 } from './Icons';
 
@@ -42,12 +43,15 @@ function fmtCount(n: number): string {
 
 export default function ModDetailModal({
   mod,
+  allMods,
   allCategories,
   modlists,
+  relations,
   onClose,
   onToast,
   onModUpdate,
   onSetModlistMembership,
+  onSetRelations,
   onCreateModlistWith,
   onCreateTag,
   onDeleteTag,
@@ -55,16 +59,20 @@ export default function ModDetailModal({
   onRefresh
 }: {
   mod: ModInfo;
+  /** 整个 mod 库，用于挑选关联 mod */
+  allMods: ModInfo[];
   allCategories: string[];
   modlists: ModlistSummary[];
+  relations: Record<string, string[]>;
   onClose: () => void;
   onToast: (kind: 'ok' | 'warn' | 'err' | 'info', title: string, msg?: string) => void;
   onModUpdate: (m: ModInfo) => void;
   onSetModlistMembership: (
-    m: ModInfo,
+    m: ModInfo | ModInfo[],
     list: { fileName: string; name: string },
     add: boolean
   ) => Promise<void>;
+  onSetRelations: (key: string, keys: string[]) => Promise<void>;
   onCreateModlistWith: (m: ModInfo, name: string) => Promise<void>;
   onCreateTag: (name: string) => Promise<void>;
   onDeleteTag: (name: string) => Promise<void>;
@@ -93,6 +101,61 @@ export default function ModDetailModal({
   const [wsDetails, setWsDetails] = useState<WorkshopDetails | null>(null);
   const [wsLoading, setWsLoading] = useState(false);
   const [wsError, setWsError] = useState<string | null>(null);
+  const [relationQ, setRelationQ] = useState('');
+  const [showRelationPicker, setShowRelationPicker] = useState(false);
+  const [pendingList, setPendingList] = useState<{ fileName: string; name: string } | null>(
+    null
+  );
+
+  /** 当前 mod 的标识，和 categories / relations 里的 key 一致 */
+  const myKey = `${mod.source}:${mod.id}`;
+  const relatedKeys = relations[myKey] || [];
+
+  const modByKey = useMemo(() => {
+    const m = new Map<string, ModInfo>();
+    for (const x of allMods) m.set(`${x.source}:${x.id}`, x);
+    return m;
+  }, [allMods]);
+
+  const relatedMods = relatedKeys.map((k) => modByKey.get(k)).filter(Boolean) as ModInfo[];
+  /** 配了关联、但这个 mod 已经不在库里了 */
+  const danglingRelations = relatedKeys.filter((k) => !modByKey.has(k));
+
+  const relationCandidates = useMemo(() => {
+    const q = relationQ.trim().toLowerCase();
+    return allMods
+      .filter(
+        (m) => `${m.source}:${m.id}` !== myKey && !relatedKeys.includes(`${m.source}:${m.id}`)
+      )
+      .filter(
+        (m) =>
+          !q ||
+          m.name.toLowerCase().includes(q) ||
+          m.id.toLowerCase().includes(q) ||
+          (m.steamworkshopid || '').includes(q)
+      )
+      .slice(0, 40);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allMods, relationQ, relations, myKey]);
+
+  async function toggleRelation(target: ModInfo) {
+    const k = `${target.source}:${target.id}`;
+    const next = relatedKeys.includes(k) ? relatedKeys.filter((x) => x !== k) : [...relatedKeys, k];
+    await onSetRelations(myKey, next);
+  }
+
+  /** 点合集标签：移出直接做；加入时如果有关联 mod，先问一句要不要一起加 */
+  function onListClick(l: { fileName: string; name: string }, on: boolean) {
+    if (on) {
+      void onSetModlistMembership(mod, l, false);
+      return;
+    }
+    if (relatedMods.length > 0) {
+      setPendingList(l);
+      return;
+    }
+    void onSetModlistMembership(mod, l, true);
+  }
 
   const isLocal = mod.source === 'local';
   /** 本地 mod 靠 filelist 里的 steamworkshopid 找到它对应的工坊条目 */
@@ -451,9 +514,7 @@ export default function ModDetailModal({
                   key={l.fileName}
                   className={`tag-toggle list-toggle ${on ? 'on' : ''}`}
                   title={on ? `从「${l.name}」移出` : `加入「${l.name}」`}
-                  onClick={() => {
-                    void onSetModlistMembership(mod, l, !on);
-                  }}
+                  onClick={() => onListClick(l, on)}
                 >
                   {on ? '✓ ' : '+ '}
                   {l.name}
@@ -467,6 +528,46 @@ export default function ModDetailModal({
               </button>
             )}
           </div>
+
+          {pendingList && (
+            <div className="warn-bar" style={{ marginTop: 10, marginBottom: 0 }}>
+              <IconAlert size={16} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div>
+                  「{mod.name}」有 {relatedMods.length} 个关联 mod：
+                  <b>{relatedMods.map((m) => m.name).join('、')}</b>。
+                </div>
+                <div className="bk-dim" style={{ marginTop: 3 }}>
+                  要一起加进「{pendingList.name}」吗？（关联通常就是前置，缺了会加载失败）
+                </div>
+                <div className="btn-row" style={{ marginTop: 8 }}>
+                  <button
+                    className="btn sm primary"
+                    onClick={() => {
+                      const target = pendingList;
+                      setPendingList(null);
+                      void onSetModlistMembership([mod, ...relatedMods], target, true);
+                    }}
+                  >
+                    一起加入（{relatedMods.length + 1} 个）
+                  </button>
+                  <button
+                    className="btn sm"
+                    onClick={() => {
+                      const target = pendingList;
+                      setPendingList(null);
+                      void onSetModlistMembership(mod, target, true);
+                    }}
+                  >
+                    只加这个
+                  </button>
+                  <button className="btn sm" onClick={() => setPendingList(null)}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {creatingList && (
             <div className="btn-row" style={{ marginTop: 10 }}>
@@ -622,6 +723,103 @@ export default function ModDetailModal({
                 </div>
               )}
             </>
+          )}
+
+          <div className="section-title">
+            关联 mod{relatedMods.length > 0 ? `（${relatedMods.length}）` : ''}
+          </div>
+
+          {relatedMods.length > 0 ? (
+            <div className="rel-list">
+              {relatedMods.map((r) => (
+                <div key={`${r.source}:${r.id}`} className="rel-row">
+                  <span className={`badge ${r.source === 'local' ? 'src-local' : 'src-workshop'}`}>
+                    {r.source === 'local' ? '本地' : '工坊'}
+                  </span>
+                  <span className="rel-name" title={r.name}>
+                    {r.name}
+                  </span>
+                  {r.modVersion && <span className="badge ver">v{r.modVersion}</span>}
+                  <button
+                    className="btn icon sm"
+                    title="取消关联"
+                    onClick={() => void toggleRelation(r)}
+                  >
+                    <IconTrash size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="hint" style={{ marginBottom: 8 }}>
+              还没有关联。关联一般用来记「前置 mod」—— 加入合集时可以顺手把它们一起加进去。
+            </div>
+          )}
+
+          {danglingRelations.length > 0 && (
+            <div className="bk-dim" style={{ marginBottom: 8 }}>
+              有 {danglingRelations.length} 个关联的 mod 已经不在库里了
+              <button
+                className="btn sm"
+                style={{ marginLeft: 8 }}
+                onClick={() =>
+                  void onSetRelations(
+                    myKey,
+                    relatedMods.map((m) => `${m.source}:${m.id}`)
+                  )
+                }
+              >
+                清理
+              </button>
+            </div>
+          )}
+
+          {!showRelationPicker ? (
+            <button className="btn sm" onClick={() => setShowRelationPicker(true)}>
+              <IconPlus size={13} />
+              添加关联 mod
+            </button>
+          ) : (
+            <div className="rel-picker">
+              <div className="search" style={{ height: 34 }}>
+                <IconSearch size={14} />
+                <input
+                  autoFocus
+                  placeholder="搜索 mod 名称 / 工坊 ID…"
+                  value={relationQ}
+                  onChange={(e) => setRelationQ(e.target.value)}
+                />
+              </div>
+              <div className="rel-candidates">
+                {relationCandidates.length === 0 && (
+                  <div className="bk-dim" style={{ padding: 10 }}>
+                    没有匹配的 mod
+                  </div>
+                )}
+                {relationCandidates.map((m) => (
+                  <button
+                    key={`${m.source}:${m.id}`}
+                    className="rel-cand"
+                    onClick={() => void toggleRelation(m)}
+                  >
+                    <span className={`badge ${m.source === 'local' ? 'src-local' : 'src-workshop'}`}>
+                      {m.source === 'local' ? '本地' : '工坊'}
+                    </span>
+                    <span className="rel-name">{m.name}</span>
+                    <IconPlus size={13} />
+                  </button>
+                ))}
+              </div>
+              <button
+                className="btn sm"
+                onClick={() => {
+                  setShowRelationPicker(false);
+                  setRelationQ('');
+                }}
+              >
+                完成
+              </button>
+            </div>
           )}
 
           <div className="section-title">

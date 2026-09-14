@@ -437,6 +437,86 @@ try {
   );
   ok(copiedFl.includes('name="工坊模组B"'), '复制后 filelist.xml 的 name 与文件夹名一致');
   ok(copiedFl.includes('installed="true"'), '优先使用了游戏实际加载的 Installed 版本');
+
+  /* ------------------ 9. 关联 mod 与「游戏当前应用」 ------------------ */
+
+  console.log('\n[9] 关联 mod 与「游戏当前应用」');
+
+  const rel = require('../electron/services/relations');
+  const relDir = path.join(TMP, 'rel');
+
+  ok(Object.keys(rel.getRelations(relDir)).length === 0, '初始没有关联');
+  ok(!fs.existsSync(relDir), '初始连文件都还没建');
+
+  rel.setRelations(relDir, 'workshop:111', [
+    'workshop:222',
+    'local:某mod',
+    'workshop:222',
+    '',
+    'workshop:111'
+  ]);
+  const r1 = rel.getRelations(relDir);
+  ok(
+    JSON.stringify(r1['workshop:111']) === JSON.stringify(['workshop:222', 'local:某mod']),
+    '保存关联：去重 / 去空值 / 去指向自己'
+  );
+  ok(fs.existsSync(path.join(relDir, 'relations.json')), '关联写进了 relations.json');
+  ok(rel.getRelations(relDir)['workshop:111'].length === 2, '重新读取（走磁盘）结果一致');
+
+  rel.setRelations(relDir, 'local:某mod', ['workshop:222']);
+  rel.removeRelations(relDir, 'workshop:222');
+  const r2 = rel.getRelations(relDir);
+  ok(
+    JSON.stringify(r2['workshop:111']) === JSON.stringify(['local:某mod']),
+    '某个 mod 被删后，别人指向它的关联被摘掉、其余保留'
+  );
+  ok(!r2['local:某mod'], '被删的那个 mod 自己的关联条目整条消失');
+
+  rel.setRelations(relDir, 'workshop:111', []);
+  ok(!rel.getRelations(relDir)['workshop:111'], '传空数组等于删掉这条关联');
+
+  // 从 config_player.xml 反推「当前生效的 mod」
+  const { readAppliedPackages } = require('../electron/services/config');
+  const appliedDir = path.join(TMP, 'applied-cfg');
+  fs.mkdirSync(appliedDir, { recursive: true });
+  const appliedCfg = path.join(appliedDir, 'config_player.xml');
+  fs.writeFileSync(
+    appliedCfg,
+    [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<config>',
+      '  <contentpackages>',
+      '    <!--Vanilla-->',
+      '    <corepackage path="Content/ContentPackages/Vanilla.xml" />',
+      '    <regularpackages>',
+      '      <package path="C:/x/WorkshopMods/Installed/2559634234/filelist.xml" />',
+      '      <package path="D:/steam/steamapps/common/Barotrauma/LocalMods/我的mod/filelist.xml" />',
+      '    </regularpackages>',
+      '  </contentpackages>',
+      '</config>'
+    ].join('\r\n'),
+    'utf8'
+  );
+
+  const ap = readAppliedPackages({ configPlayerPath: appliedCfg });
+  ok(ap.available, '读得到 config_player.xml');
+  ok(ap.entries.length === 2, `解析出 ${ap.entries.length} 条（corepackage 不算在内）`);
+  ok(
+    ap.entries[0].type === 'workshop' && ap.entries[0].id === '2559634234',
+    '纯数字目录名判为工坊 mod'
+  );
+  ok(
+    ap.entries[1].type === 'local' && ap.entries[1].name === '我的mod',
+    '非数字目录名判为本地 mod'
+  );
+
+  const apNone = readAppliedPackages({ configPlayerPath: path.join(appliedDir, 'nope.xml') });
+  ok(!apNone.available && apNone.entries.length === 0, '配置文件不存在时安全返回而不是抛错');
+
+  const cfgNoBlock = path.join(appliedDir, 'no-block.xml');
+  fs.writeFileSync(cfgNoBlock, '<config><other /></config>', 'utf8');
+  const apNoBlock = readAppliedPackages({ configPlayerPath: cfgNoBlock });
+  ok(!apNoBlock.available && !!apNoBlock.reason, '没有 contentpackages 段时给出原因');
 } catch (e) {
   console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
   failures++;

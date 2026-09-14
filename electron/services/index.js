@@ -20,9 +20,14 @@ const {
   removeModFromModlist,
   xmlEscape
 } = require('./modlists');
-const { applyToGame, stamp } = require('./config');
+const { applyToGame, stamp, readAppliedPackages } = require('./config');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
+const {
+  getRelations,
+  setRelations,
+  removeRelations
+} = require('./relations');
 const {
   listSnapshots,
   snapshotSummary,
@@ -77,7 +82,7 @@ function findCover(key) {
 /* copyDir / dirStats 等文件工具在 fsutil.js */
 
 /** 读一次合集目录：同时得到摘要列表和「mod → 所属合集」映射 */
-function readAllModlists(dir) {
+function readAllModlists(dir, appliedKeys) {
   let files;
   try {
     files = fs.readdirSync(dir, { withFileTypes: true });
@@ -86,6 +91,8 @@ function readAllModlists(dir) {
   }
   const summaries = [];
   const usedIn = new Map();
+  const appliedSet = new Set(appliedKeys || []);
+  const hasApplied = appliedSet.size > 0;
 
   for (const f of files) {
     if (!f.isFile() || !/\.xml$/i.test(f.name)) continue;
@@ -95,7 +102,21 @@ function readAllModlists(dir) {
     } catch {
       continue;
     }
-    summaries.push({ fileName: ml.fileName, name: ml.name, count: ml.entries.length });
+
+    const keys = ml.entries.map((e) =>
+      e.type === 'workshop' ? `workshop:${e.id}` : `local:${e.name}`
+    );
+    // 内容和当前游戏生效的一致就标记出来（按集合比较，顺序不参与）
+    const matchesApplied =
+      hasApplied && keys.length === appliedSet.size && keys.every((k) => appliedSet.has(k));
+
+    summaries.push({
+      fileName: ml.fileName,
+      name: ml.name,
+      count: ml.entries.length,
+      matchesApplied
+    });
+
     for (const e of ml.entries) {
       const key = e.type === 'workshop' ? `workshop:${e.id}` : `local:${e.name}`;
       const arr = usedIn.get(key) || [];
@@ -124,7 +145,20 @@ function scanAll() {
   const cats = getCategories();
   const removed = cats.removed || [];
   const previewDir = path.join(userDataDir(), 'previews');
-  const { summaries, usedIn } = readAllModlists(s.modListsDir);
+
+  // 当前游戏实际生效的 mod：从 config_player.xml 的 <contentpackages> 反推
+  const appliedRaw = readAppliedPackages(s);
+  const appliedKeys = [];
+  const appliedMissing = [];
+  if (appliedRaw.available) {
+    for (const e of appliedRaw.entries) {
+      if (e.type === 'workshop') appliedKeys.push(`workshop:${e.id}`);
+      else if (e.type === 'local') appliedKeys.push(`local:${e.name}`);
+      else appliedMissing.push(e.path);
+    }
+  }
+
+  const { summaries, usedIn } = readAllModlists(s.modListsDir, appliedKeys);
 
   const mods = [...workshop, ...local];
   for (const m of mods) {
@@ -137,7 +171,29 @@ function scanAll() {
     m.usedIn = usedIn.get(key) || [];
   }
 
-  return { mods, modlists: summaries, categories: cats, settings: s, warnings };
+  // 生效列表里有、但当前目录找不到的（被删了或者没装）
+  const knownKeys = new Set(mods.map((m) => `${m.source}:${m.id}`));
+  for (const k of appliedKeys) {
+    if (knownKeys.has(k)) continue;
+    appliedMissing.push(k.startsWith('workshop:') ? `#${k.slice('workshop:'.length)}` : k.slice('local:'.length));
+  }
+
+  const applied = {
+    available: appliedRaw.available,
+    reason: appliedRaw.reason || null,
+    keys: appliedKeys,
+    missing: appliedMissing
+  };
+
+  return {
+    mods,
+    modlists: summaries,
+    categories: cats,
+    settings: s,
+    warnings,
+    applied,
+    relations: getRelations(userDataDir())
+  };
 }
 
 function send(sender, channel, payload) {
@@ -321,6 +377,10 @@ function registerIpc() {
   ipcMain.handle('categories:addCustom', (_e, name) => addCustomCategory(name));
   ipcMain.handle('categories:deleteTag', (_e, name) => deleteCategory(name));
 
+  /* ------------------------------ 关联 mod ------------------------------ */
+
+  ipcMain.handle('relations:set', (_e, key, keys) => setRelations(userDataDir(), key, keys));
+
   /* ---------------------------- 版本对比动作 ---------------------------- */
 
   ipcMain.handle('compare:diff', (_e, localId) => {
@@ -454,6 +514,8 @@ function registerIpc() {
     }
 
     const r = deleteLocalModFiles(s, name);
+    // 顺手清掉它的关联关系，免得留下指向已删 mod 的死链
+    removeRelations(userDataDir(), `local:${name}`);
     return { ...r, removedFromModlists };
   });
 

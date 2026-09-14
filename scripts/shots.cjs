@@ -216,6 +216,42 @@ app.whenReady().then(async () => {
       })
   );
 
+  // 「未分类」特殊标签：作为筛选芯片存在，且筛出来的每张卡都带「未分类」徽章
+  await win.webContents.executeJavaScript(`(() => {
+    const chip = Array.from(document.querySelectorAll('.chips-row .tag-toggle')).find((b) =>
+      b.textContent.includes('未分类')
+    );
+    if (chip) chip.click();
+  })()`);
+  await sleep(500);
+  console.log(
+    'uncategorized=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const chip = Array.from(document.querySelectorAll('.chips-row .tag-toggle')).find((b) =>
+            b.textContent.includes('未分类')
+          );
+          const cards = Array.from(document.querySelectorAll('.card'));
+          const withBadge = cards.filter((c) => c.textContent.includes('未分类')).length;
+          return {
+            芯片文案: chip ? chip.textContent.trim() : null,
+            芯片已选中: chip ? chip.classList.contains('on') : null,
+            筛出数量: (document.querySelector('.result-count') || {}).textContent || null,
+            卡片数: cards.length,
+            每张卡都标了未分类: cards.length > 0 && withBadge === cards.length
+          };
+        })()`)
+      )
+  );
+  // 恢复「全部」
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.chips-row .tag-toggle')).find(
+      (x) => x.textContent.trim() === '全部'
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(300);
+
   // 滚动验证：卡片区必须能滚，且工具栏保持可见
   const scroll = await win.webContents.executeJavaScript(`(() => {
     const c = document.querySelector('.lib-scroll');
@@ -250,6 +286,52 @@ app.whenReady().then(async () => {
     return { scrollHeight: e.scrollHeight, clientHeight: e.clientHeight, before, after: e.scrollTop };
   })()`);
   console.log('rows-scroll=' + JSON.stringify(rowsScroll));
+
+  // 合集列表顶部的「游戏当前应用」虚拟条目
+  console.log(
+    'applied-entry=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const row = document.querySelector('.applied-row');
+          if (!row) return { present: false };
+          const badged = Array.from(document.querySelectorAll('.list-row')).filter((r) =>
+            r.querySelector('.badge.applied')
+          );
+          return {
+            present: true,
+            text: row.textContent.replace(/\\s+/g, ' ').trim(),
+            带当前应用徽章的合集数: badged.length
+          };
+        })()`)
+      )
+  );
+
+  await win.webContents.executeJavaScript(
+    `document.querySelector('.applied-row').click()`
+  );
+  await sleep(700);
+  console.log(
+    'applied-panel=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const head = document.querySelector('.editor-head h3');
+          const idx = Array.from(document.querySelectorAll('.mod-row .row-index')).map(
+            (x) => x.textContent.trim()
+          );
+          const names = Array.from(document.querySelectorAll('.mod-row .row-name')).map((x) =>
+            x.textContent.trim()
+          );
+          return {
+            标题: head ? head.textContent.trim() : null,
+            行数: idx.length,
+            序号连续: idx.every((v, i) => Number(v) === i + 1),
+            前三个: names.slice(0, 3),
+            只读无删除按钮: document.querySelectorAll('.mod-rows .btn.icon').length === 0
+          };
+        })()`)
+      )
+  );
+  await shot(win, '17-applied');
 
   await win.webContents.executeJavaScript(`document.querySelectorAll('.nav-item')[2].click()`);
   await sleep(800);
@@ -319,16 +401,75 @@ app.whenReady().then(async () => {
   })()`);
   await sleep(300);
 
-  // 验证「加入合集」：点一个合集 chip，应出现提示
+  // 关联 mod：先加一个关联……
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal .btn')).find((x) =>
+      x.textContent.includes('添加关联 mod')
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(400);
+  const relPicked = await win.webContents.executeJavaScript(`(() => {
+    const cands = Array.from(document.querySelectorAll('.rel-cand'));
+    if (!cands.length) return null;
+    const name = (cands[0].querySelector('.rel-name') || {}).textContent || '';
+    cands[0].click();
+    return name;
+  })()`);
+  await sleep(700);
+  const relRows = await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.rel-row .rel-name')).map((x) => x.textContent.trim())`
+  );
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.rel-picker .btn')).find(
+      (x) => x.textContent.trim() === '完成'
+    );
+    if (b) b.click();
+  })()`);
+  await sleep(300);
+  console.log(
+    'relation-added=' + JSON.stringify({ 选中: relPicked, 关联列表: relRows })
+  );
+
+  // ……再验证「加入合集时可选是否一并加入关联 mod」
   const chip = await win.webContents.executeJavaScript(`(() => {
-    const c = document.querySelector('.list-toggle');
+    const c = Array.from(document.querySelectorAll('.list-toggle')).find(
+      (x) => !x.classList.contains('on')
+    );
     if (!c) return null;
-    const label = c.textContent;
+    const label = c.textContent.trim();
     c.click();
     return label;
   })()`);
   console.log('clicked modlist chip: ' + chip);
   await sleep(700);
+  console.log(
+    'related-prompt=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const bar = Array.from(document.querySelectorAll('.warn-bar')).find((b) =>
+            b.textContent.includes('关联 mod')
+          );
+          if (!bar) return { shown: false };
+          return {
+            shown: true,
+            text: bar.textContent.replace(/\\s+/g, ' ').trim().slice(0, 110),
+            buttons: Array.from(bar.querySelectorAll('.btn')).map((b) => b.textContent.trim())
+          };
+        })()`)
+      )
+  );
+  await shot(win, '18-related-prompt');
+
+  await win.webContents.executeJavaScript(`(() => {
+    const bar = Array.from(document.querySelectorAll('.warn-bar')).find((b) =>
+      b.textContent.includes('关联 mod')
+    );
+    const b =
+      bar && Array.from(bar.querySelectorAll('.btn')).find((x) => x.textContent.includes('一起加入'));
+    if (b) b.click();
+  })()`);
+  await sleep(900);
   const toasts = await win.webContents.executeJavaScript(
     `Array.from(document.querySelectorAll('.toast .t-title')).map((x) => x.textContent)`
   );

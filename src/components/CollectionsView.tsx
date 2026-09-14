@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ModInfo, ModlistEntry, ModlistFull, ModlistSummary } from '../types';
+import type { AppliedInfo, ModInfo, ModlistEntry, ModlistFull, ModlistSummary } from '../types';
 import { api, imgSrc, placeholderHue } from '../api';
 import { compareBadge, initials, safeFileName, uniq } from '../ui';
 import {
@@ -9,20 +9,26 @@ import {
   IconLayers,
   IconPlus,
   IconPlay,
+  IconRefresh,
   IconSave,
   IconSearch,
   IconTrash
 } from './Icons';
 
+/** 合集列表里的一个虚拟条目：游戏当前生效的内容 */
+const APPLIED = '__applied__';
+
 export default function CollectionsView({
   mods,
   modlists,
+  applied,
   reloadToken,
   onRefresh,
   onToast
 }: {
   mods: ModInfo[];
   modlists: ModlistSummary[];
+  applied: AppliedInfo | null;
   reloadToken: number;
   onRefresh: () => Promise<void>;
   onToast: (kind: 'ok' | 'warn' | 'err' | 'info', title: string, msg?: string) => void;
@@ -47,7 +53,7 @@ export default function CollectionsView({
 
   useEffect(() => {
     let alive = true;
-    if (!selectedFile) {
+    if (!selectedFile || selectedFile === APPLIED) {
       setCurrent(null);
       return;
     }
@@ -86,6 +92,20 @@ export default function CollectionsView({
     return current.entries.filter((e) => !resolve(e)).length;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, byWorkshopId, byLocalName]);
+
+  /** 游戏当前生效的内容，按加载顺序解析成 mod 信息 */
+  const appliedRows = useMemo(() => {
+    if (!applied || !applied.available) return [];
+    return applied.keys.map((k) => {
+      const i = k.indexOf(':');
+      const type = k.slice(0, i);
+      const val = k.slice(i + 1);
+      const entry: ModlistEntry =
+        type === 'workshop' ? { type: 'workshop', id: val } : { type: 'local', name: val };
+      return { key: k, entry, mod: resolve(entry) };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applied, byWorkshopId, byLocalName]);
 
   const entries = current?.entries || [];
 
@@ -252,6 +272,30 @@ export default function CollectionsView({
         )}
 
         <div className="list-scroll">
+          {/* 游戏当前生效的内容：一个虚拟条目，不是磁盘上的合集文件 */}
+          {applied && (
+            <div
+              className={`list-row applied-row ${selectedFile === APPLIED ? 'active' : ''}`}
+              onClick={() => setSelectedFile(APPLIED)}
+              title="读自 config_player.xml，即游戏现在真正加载的 mod"
+            >
+              <div className="list-row-name">
+                <IconPlay size={13} />
+                <span
+                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  游戏当前应用
+                </span>
+              </div>
+              <div className="list-row-sub">
+                {applied.available ? `${applied.keys.length} 个 mod` : '读不到配置'}
+                {applied.available && applied.missing.length > 0 && (
+                  <span className="badge st-different">{applied.missing.length} 个缺失</span>
+                )}
+              </div>
+            </div>
+          )}
+
           {modlists.length === 0 && (
             <div className="empty" style={{ padding: 24 }}>
               <div>还没有合集</div>
@@ -277,14 +321,105 @@ export default function CollectionsView({
                   <span className="dot" style={{ background: 'var(--warn)', flex: 'none' }} />
                 )}
               </div>
-              <div className="list-row-sub">{l.count} 个 mod</div>
+              <div className="list-row-sub">
+                {l.count} 个 mod
+                {l.matchesApplied && <span className="badge applied">当前应用</span>}
+              </div>
             </div>
           ))}
         </div>
       </div>
 
       {/* 右：编辑器 */}
-      {current ? (
+      {selectedFile === APPLIED ? (
+        <div className="editor">
+          <div className="editor-head">
+            <IconPlay size={15} />
+            <h3 style={{ margin: 0, fontSize: 15 }}>游戏当前应用</h3>
+            {applied?.available ? (
+              <span className="badge ver">{appliedRows.length} 个 mod</span>
+            ) : (
+              <span className="badge st-different">读不到配置</span>
+            )}
+            {applied && applied.missing.length > 0 && (
+              <span className="badge st-different" title={applied.missing.join('\n')}>
+                <IconAlert size={11} /> {applied.missing.length} 个缺失
+              </span>
+            )}
+            <span className="spacer" />
+            <button className="btn sm" onClick={() => void onRefresh()}>
+              <IconRefresh size={14} />
+              刷新
+            </button>
+          </div>
+
+          <div className="editor-body">
+            {!applied?.available ? (
+              <div className="empty" style={{ padding: 40 }}>
+                <IconAlert size={28} />
+                <div className="empty-title">读不到游戏当前配置</div>
+                <div>{applied?.reason || '请到「设置」里确认 config_player.xml 的路径'}</div>
+              </div>
+            ) : appliedRows.length === 0 ? (
+              <div className="empty" style={{ padding: 40 }}>
+                <IconPlay size={28} />
+                <div className="empty-title">游戏当前只加载了原版内容</div>
+                <div>在任意合集里点「应用到游戏」，这里就会显示实际生效的 mod</div>
+              </div>
+            ) : (
+              <>
+                <div className="hint">
+                  这是游戏现在真正加载的 mod，按加载顺序排列（读自 config_player.xml）。
+                  这里是只读的，要改请回到对应合集里改完再应用。
+                </div>
+                <div className="mod-rows">
+                  {appliedRows.map((r, i) => {
+                    const hue = placeholderHue(r.entry.name || r.entry.id || '?');
+                    const src = imgSrc(r.mod?.preview || null);
+                    const cb = r.mod ? compareBadge(r.mod) : null;
+                    return (
+                      <div key={r.key} className="mod-row" style={{ cursor: 'default' }}>
+                        <div className="row-index">{i + 1}</div>
+                        <div className="row-thumb">
+                          {src ? (
+                            <img src={src} alt="" />
+                          ) : (
+                            <div
+                              className="cover-ph"
+                              style={{
+                                background: `linear-gradient(140deg, hsl(${hue} 52% 34%), hsl(${(hue + 46) % 360} 58% 16%))`
+                              }}
+                            >
+                              {initials(r.entry.name || r.entry.id || '?')}
+                            </div>
+                          )}
+                        </div>
+                        <div className="row-main">
+                          <div className="row-name">
+                            {r.mod?.name || r.entry.name || `#${r.entry.id}`}
+                          </div>
+                          <div className="row-sub">
+                            <span
+                              className={`badge ${r.entry.type === 'local' ? 'src-local' : 'src-workshop'}`}
+                            >
+                              {r.entry.type === 'local' ? '本地' : '工坊'}
+                            </span>
+                            {r.mod?.modVersion && (
+                              <span className="badge ver">v{r.mod.modVersion}</span>
+                            )}
+                            {cb && <span className={`badge ${cb.cls}`}>{cb.text}</span>}
+                            {!r.mod && <span className="badge st-different">未找到</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : current ? (
         <div className="editor">
           <div className="editor-head">
             <input

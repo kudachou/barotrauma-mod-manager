@@ -154,48 +154,89 @@ export default function App() {
     setSelected((cur) => (cur && cur.source === m.source && cur.id === m.id ? { ...cur, ...m } : cur));
   }, []);
 
-  /** 在 mod 详情页直接加入 / 移出合集 */
+  /**
+   * 在 mod 详情页直接加入 / 移出合集。
+   * 支持一次处理多个 —— 用于「连带关联（前置）mod 一起加入」。
+   */
   const setModlistMembership = useCallback(
-    async (m: ModInfo, list: { fileName: string; name: string }, add: boolean) => {
-      const entry: ModlistEntry =
+    async (input: ModInfo | ModInfo[], list: { fileName: string; name: string }, add: boolean) => {
+      const keyOf = (m: ModInfo) => `${m.source}:${m.id}`;
+      const entryOf = (m: ModInfo): ModlistEntry =>
         m.source === 'workshop'
           ? { type: 'workshop', name: m.name, id: m.id }
           : { type: 'local', name: m.id };
+
+      const seen = new Set<string>();
+      const items = (Array.isArray(input) ? input : [input]).filter((m) => {
+        if (!m) return false;
+        const k = keyOf(m);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      if (!items.length) return;
+
+      const done: ModInfo[] = [];
       try {
-        if (add) await api.addModToModlist(list.fileName, list.name, entry);
-        else await api.removeModFromModlist(list.fileName, entry);
+        for (const m of items) {
+          const entry = entryOf(m);
+          if (add) await api.addModToModlist(list.fileName, list.name, entry);
+          else await api.removeModFromModlist(list.fileName, entry);
+          done.push(m);
+        }
       } catch (e: any) {
         pushToast('err', add ? '加入合集失败' : '移出合集失败', String(e?.message || e));
         return;
       }
 
+      const keys = new Set(done.map(keyOf));
       const adjust = (names: string[]) =>
         add ? uniq([...names, list.name]) : names.filter((n) => n !== list.name);
+      const delta = add ? done.length : -done.length;
 
       setData((prev) => {
         if (!prev) return prev;
         const exists = prev.modlists.some((l) => l.fileName === list.fileName);
         return {
           ...prev,
-          mods: prev.mods.map((x) =>
-            x.source === m.source && x.id === m.id ? { ...x, usedIn: adjust(x.usedIn) } : x
-          ),
+          mods: prev.mods.map((x) => (keys.has(keyOf(x)) ? { ...x, usedIn: adjust(x.usedIn) } : x)),
           modlists: exists
             ? prev.modlists.map((l) =>
                 l.fileName === list.fileName
-                  ? { ...l, count: Math.max(0, l.count + (add ? 1 : -1)) }
+                  ? { ...l, count: Math.max(0, l.count + delta) }
                   : l
               )
-            : [...prev.modlists, { fileName: list.fileName, name: list.name, count: 1 }]
+            : [...prev.modlists, { fileName: list.fileName, name: list.name, count: done.length }]
         };
       });
       setSelected((cur) =>
-        cur && cur.source === m.source && cur.id === m.id
-          ? { ...cur, usedIn: adjust(cur.usedIn) }
-          : cur
+        cur && keys.has(keyOf(cur)) ? { ...cur, usedIn: adjust(cur.usedIn) } : cur
       );
       setReloadToken((n) => n + 1);
-      pushToast('ok', add ? `已加入合集「${list.name}」` : `已从合集「${list.name}」移出`);
+
+      if (add) {
+        pushToast(
+          'ok',
+          done.length > 1
+            ? `已加入合集「${list.name}」（含 ${done.length - 1} 个关联 mod）`
+            : `已加入合集「${list.name}」`
+        );
+      } else {
+        pushToast('ok', `已从合集「${list.name}」移出`);
+      }
+    },
+    [pushToast]
+  );
+
+  /** 保存 mod 之间的关联（前置需求） */
+  const setRelations = useCallback(
+    async (key: string, keys: string[]) => {
+      try {
+        const next = await api.setRelations(key, keys);
+        setData((prev) => (prev ? { ...prev, relations: next } : prev));
+      } catch (e: any) {
+        pushToast('err', '保存关联失败', String(e?.message || e));
+      }
     },
     [pushToast]
   );
@@ -361,6 +402,7 @@ export default function App() {
             <CollectionsView
               mods={mods}
               modlists={modlists}
+              applied={data?.applied || null}
               reloadToken={reloadToken}
               onRefresh={refresh}
               onToast={pushToast}
@@ -384,8 +426,11 @@ export default function App() {
       {selected && (
         <ModDetailModal
           mod={selected}
+          allMods={mods}
           allCategories={allCategories}
           modlists={modlists}
+          relations={data?.relations || {}}
+          onSetRelations={setRelations}
           onSetModlistMembership={setModlistMembership}
           onCreateModlistWith={createModlistWith}
           onCreateTag={addCustomTag}

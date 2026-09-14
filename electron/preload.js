@@ -41,6 +41,9 @@ contextBridge.exposeInMainWorld('api', {
   addCustomCategory: (name) => invoke('categories:addCustom', name),
   deleteCategory: (name) => invoke('categories:deleteTag', name),
 
+  // 关联 mod（前置需求）
+  setRelations: (key, keys) => invoke('relations:set', key, keys),
+
   // version compare actions
   getVersionDiff: (localId) => invoke('compare:diff', localId),
   overwriteLocalWithWorkshop: (localId, workshopId) => invoke('compare:overwrite', localId, workshopId),

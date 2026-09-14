@@ -101,4 +101,59 @@ function applyToGame(settings, entries) {
   return { backup, missing, count: packages.length };
 }
 
-module.exports = { applyToGame, buildContentPackagesBlock, toSlash, stamp };
+/**
+ * 读取 config_player.xml 里当前**实际生效**的 mod（<contentpackages> 段）。
+ *
+ * 游戏应用合集时会把路径解析成绝对路径写进去，所以这里从路径反推：
+ *   …/WorkshopMods/Installed/<纯数字 id>/filelist.xml → 工坊 mod
+ *   …/LocalMods/<文件夹名>/filelist.xml               → 本地 mod
+ * 反推只看路径形状，不依赖用户配置的目录位置 —— 他把 LocalMods 挪到别处也照样认得出来。
+ */
+function readAppliedPackages(settings) {
+  const cfgPath = settings && settings.configPlayerPath;
+  if (!cfgPath || !fs.existsSync(cfgPath)) {
+    return { available: false, entries: [], reason: '找不到 config_player.xml' };
+  }
+
+  let raw;
+  try {
+    raw = stripBom(fs.readFileSync(cfgPath, 'utf8'));
+  } catch (e) {
+    return { available: false, entries: [], reason: String((e && e.message) || e) };
+  }
+
+  const block = raw.match(/<contentpackages>[\s\S]*?<\/contentpackages>/i);
+  if (!block) {
+    return {
+      available: false,
+      entries: [],
+      reason: 'config_player.xml 里没有 <contentpackages> 段'
+    };
+  }
+
+  const entries = [];
+  const re = /<package\b[^>]*\bpath\s*=\s*"([^"]*)"/gi;
+  let m;
+  while ((m = re.exec(block[0]))) {
+    const p = toSlash(m[1]);
+    const parts = p.split('/').filter(Boolean);
+    const last = (parts[parts.length - 1] || '').toLowerCase();
+    const parent = parts[parts.length - 2] || '';
+    if (last === 'filelist.xml' && parent) {
+      if (/^\d+$/.test(parent)) entries.push({ type: 'workshop', id: parent });
+      else entries.push({ type: 'local', name: parent });
+    } else {
+      entries.push({ type: 'unknown', path: m[1] });
+    }
+  }
+
+  return { available: true, entries, reason: null };
+}
+
+module.exports = {
+  applyToGame,
+  buildContentPackagesBlock,
+  readAppliedPackages,
+  toSlash,
+  stamp
+};

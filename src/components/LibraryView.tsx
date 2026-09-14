@@ -1,10 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { CategoryData, ModInfo } from '../types';
 import ModCard from './ModCard';
 import { IconAlert, IconSearch } from './Icons';
 import { categoryStyle } from '../categories';
 
 type SortKey = 'name' | 'name-desc' | 'ver' | 'mtime';
+
+/** 分类筛选里的特殊项：没有任何标签的 mod */
+const UNCATEGORIZED = '__uncategorized__';
+
+/** 「未分类」= 手动标签和关键词自动分类都为空（与卡片上的「未分类」徽章一致） */
+function isUncategorized(m: ModInfo): boolean {
+  return m.categories.length === 0 && m.autoCategories.length === 0;
+}
 
 export default function LibraryView({
   mods,
@@ -38,6 +46,8 @@ export default function LibraryView({
     [mods]
   );
 
+  const uncategorizedCount = useMemo(() => mods.filter(isUncategorized).length, [mods]);
+
   /*
    * 筛选条件可能因为数据变化而「失效」：更新完就没有「有更新」的 mod 了，
    * 或者某个分类下的 mod 全被删了。这时对应的按钮会消失 —— 如果还继续套用这个条件，
@@ -45,11 +55,13 @@ export default function LibraryView({
    * 所以这里统一做一次有效性校正，并且把失效的原始状态也清掉
    * （否则数据恢复后筛选会「自己」又生效）。
    */
-  const effectiveCat = cat === '全部' || catList.includes(cat) ? cat : '全部';
+  const effectiveCat =
+    cat === '全部' || cat === UNCATEGORIZED || catList.includes(cat) ? cat : '全部';
   const effectiveOnlyOutdated = onlyOutdated && outdatedCount > 0;
 
   useEffect(() => {
-    if (cat !== '全部' && !catList.includes(cat)) setCat('全部');
+    // UNCATEGORIZED 是个虚拟分类，不在 catList 里，别把它当成失效条件重置掉
+    if (cat !== '全部' && cat !== UNCATEGORIZED && !catList.includes(cat)) setCat('全部');
   }, [cat, catList]);
 
   useEffect(() => {
@@ -59,7 +71,8 @@ export default function LibraryView({
   const filtered = useMemo(() => {
     let out = mods;
     if (source !== 'all') out = out.filter((m) => m.source === source);
-    if (effectiveCat !== '全部')
+    if (effectiveCat === UNCATEGORIZED) out = out.filter(isUncategorized);
+    else if (effectiveCat !== '全部')
       out = out.filter(
         (m) => m.categories.includes(effectiveCat) || m.autoCategories.includes(effectiveCat)
       );
@@ -153,17 +166,27 @@ export default function LibraryView({
       </div>
 
       <div className="chips-row">
-        {catList.map((c) => {
+        {catList.map((c, i) => {
           const on = effectiveCat === c;
           return (
-            <button
-              key={c}
-              className={`tag-toggle ${on ? 'on' : ''}`}
-              onClick={() => setCat(c)}
-              style={on && c !== '全部' ? categoryStyle(c) : undefined}
-            >
-              {c}
-            </button>
+            <Fragment key={c}>
+              <button
+                className={`tag-toggle ${on ? 'on' : ''}`}
+                onClick={() => setCat(c)}
+                style={on && c !== '全部' ? categoryStyle(c) : undefined}
+              >
+                {c}
+              </button>
+              {i === 0 && (
+                <button
+                  className={`tag-toggle ${effectiveCat === UNCATEGORIZED ? 'on' : ''}`}
+                  onClick={() => setCat(effectiveCat === UNCATEGORIZED ? '全部' : UNCATEGORIZED)}
+                  title="只看还没有任何标签的 mod —— 新订阅的 mod 通常都在这里"
+                >
+                  未分类 {uncategorizedCount}
+                </button>
+              )}
+            </Fragment>
           );
         })}
       </div>
