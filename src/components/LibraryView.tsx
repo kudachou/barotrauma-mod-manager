@@ -66,6 +66,15 @@ export default function LibraryView({
   );
 
   const delistedCount = useMemo(() => sourceMods.filter((m) => m.delisted).length, [sourceMods]);
+  /**
+   * 措辞要跟卡片徽章一致：官方接口确认的才叫「已下架」；
+   * 只靠抓网页得出「看不到」的，可能是下架、也可能是作者（或用户自己）设成了私有，
+   * 所以只能说「工坊不可见」。
+   */
+  const delistedAreInvisibleOnly =
+    delistedCount > 0 &&
+    sourceMods.filter((m) => m.delisted).every((m) => m.delistedHow === 'page-invisible');
+  const delistedLabel = delistedAreInvisibleOnly ? '工坊不可见' : '已下架';
 
   /*
    * 筛选条件可能因为数据变化而「失效」：更新完就没有「有更新」的 mod 了，
@@ -177,10 +186,15 @@ export default function LibraryView({
           <button
             className={`btn sm delisted-chip ${effectiveOnlyDelisted ? 'primary' : ''}`}
             onClick={() => setOnlyDelisted((v) => !v)}
-            title="只看已被作者从创意工坊下架的 mod —— 工坊上再也下不到了，建议备份到本地"
+            title={
+              delistedAreInvisibleOnly
+                ? '只看工坊上匿名看不到的 mod —— 可能是已下架，也可能是作者（或你自己）设成了私有。' +
+                  '在设置里填个 Steam API Key 就能准确区分'
+                : '只看已被作者从创意工坊下架的 mod —— 工坊上再也下不到了，建议备份到本地'
+            }
           >
             <IconAlert size={13} />
-            已下架 {delistedCount}
+            {delistedLabel} {delistedCount}
           </button>
         )}
 
