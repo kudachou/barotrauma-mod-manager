@@ -19,6 +19,7 @@ import SettingsView from './components/SettingsView';
 import ModDetailModal from './components/ModDetailModal';
 import UpdateBanner from './components/UpdateBanner';
 import BackupModal from './components/BackupModal';
+import SyncModal from './components/SyncModal';
 import Toasts, { type ToastItem } from './components/Toasts';
 import { IconAlert, IconDownload, IconPlay, IconRefresh } from './components/Icons';
 
@@ -38,6 +39,7 @@ export default function App() {
   const [reloadToken, setReloadToken] = useState(0);
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [backupOpen, setBackupOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
   const [backupScope, setBackupScope] = useState<'all' | 'delisted'>('all');
   /** 用户点了「稍后」的版本号，同一个版本不再弹 */
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
@@ -225,6 +227,8 @@ export default function App() {
 
   const mods = data?.mods || [];
   const modlists = data?.modlists || [];
+  /** Steam 已下载、游戏还没装的工坊更新数量（>0 时顶部出现「同步到游戏」） */
+  const pendingInstall = data?.installPendingCount || 0;
   const categories = data?.categories || { mods: {}, custom: [], removed: [] };
 
   const allCategories = useMemo(() => {
@@ -440,6 +444,18 @@ export default function App() {
             <div className="page-sub">{TITLES[view].sub}</div>
           </div>
           <span className="spacer" />
+          {pendingInstall > 0 && (
+            <button
+              className="btn"
+              onClick={() => setSyncOpen(true)}
+              title={`Steam 已经下载好了 ${pendingInstall} 个 mod 的更新，但游戏还没装 —— 点这里同步进去`}
+              style={{ borderColor: 'var(--warn)' }}
+            >
+              <IconDownload size={15} />
+              同步到游戏
+              <span className="badge st-older">{pendingInstall}</span>
+            </button>
+          )}
           <button
             className="btn"
             onClick={() => {
@@ -560,6 +576,10 @@ export default function App() {
           onToast={pushToast}
           onDone={refresh}
         />
+      )}
+
+      {syncOpen && (
+        <SyncModal onClose={() => setSyncOpen(false)} onToast={pushToast} onDone={refresh} />
       )}
 
       <Toasts items={toasts} onClose={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />

@@ -776,12 +776,12 @@ try {
 
   const svMods = [];
   for (const [root, id, name] of [
-    [svSteam, '7001', 'Amod'],
-    [svSteam, '7002', 'Bmod'],
-    [svSteam, '7003', 'Cmod'],
-    [svInst, '7001', 'Amod'],
-    [svInst, '7002', 'Bmod'],
-    [svInst, '7003', 'Cmod']
+    [svSteam, '70001', 'Amod'],
+    [svSteam, '70002', 'Bmod'],
+    [svSteam, '70003', 'Cmod'],
+    [svInst, '70001', 'Amod'],
+    [svInst, '70002', 'Bmod'],
+    [svInst, '70003', 'Cmod']
   ]) {
     writeMod(root, id, `<contentpackage name="${name}" modversion="1.0" steamworkshopid="${id}" />`);
     svMods.push({ source: 'workshop', id, name });
@@ -791,13 +791,13 @@ try {
   svMods.push({ source: 'local', id: 'my-folder', name: 'Lmod' });
 
   modlists.saveModlist(svLists, '全套.xml', '全套', [
-    { type: 'workshop', name: 'Amod', id: '7001' },
-    { type: 'workshop', name: 'Bmod', id: '7002' },
-    { type: 'workshop', name: 'Cmod', id: '7003' },
+    { type: 'workshop', name: 'Amod', id: '70001' },
+    { type: 'workshop', name: 'Bmod', id: '70002' },
+    { type: 'workshop', name: 'Cmod', id: '70003' },
     { type: 'local', name: 'my-folder' }
   ]);
   modlists.saveModlist(svLists, '只有A.xml', '只有A', [
-    { type: 'workshop', name: 'Amod', id: '7001' }
+    { type: 'workshop', name: 'Amod', id: '70001' }
   ]);
 
   writeSave(svSingle, '完全一致.save', ['Vanilla', 'Amod', 'Bmod', 'Cmod', 'Lmod']);
@@ -912,6 +912,146 @@ try {
   ok(
     r12.saves.indexOf(byName('未压缩')) >= 0 && r12.saves[0].saveTime >= r12.saves[r12.saves.length - 1].saveTime,
     '按存档时间从新到旧排序'
+  );
+
+  /* -------- 13. 把 Steam 已下载的工坊更新同步进游戏（installsync） -------- */
+  console.log('\n[13] 工坊更新同步到游戏');
+
+  const isync = require('../electron/services/installsync');
+
+  const syRoot = path.join(TMP, 'sync');
+  const syWs = path.join(syRoot, 'ws', '602960'); // basename 就是 appid，.acf 放在上一层
+  const syInst = path.join(syRoot, 'ws', 'Installed');
+  const sySettings = { workshopModsDir: syWs, installedWorkshopDir: syInst };
+
+  function writeTree(root, id, files) {
+    const dir = path.join(root, id);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [rel, body] of Object.entries(files)) {
+      const p = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, body, 'utf8');
+    }
+    return dir;
+  }
+
+  const flx = (name, version, extra = '') =>
+    `<?xml version="1.0" encoding="utf-8"?>\n<contentpackage name="${name}" steamworkshopid="${name}" ` +
+    `modversion="${version}" expectedhash="ABCD"${extra} />\n`;
+
+  // 7001：Steam 有 2.0，Installed 还是 1.0（installtime 1000）→ 待同步
+  writeTree(syWs, '70001', {
+    'filelist.xml': flx('A', '2.0'),
+    'items/a.xml': '<a/>',
+    'items/b.xml': '<b/>'
+  });
+  writeTree(syInst, '70001', {
+    'filelist.xml': flx('A', '1.0', ' installtime="1000"'),
+    'items/a.xml': '<old/>',
+    'items/gone.xml': '<stale/>'
+  });
+  // 7002：已同步（installtime == .acf 的 timeupdated 2000）→ 不进计划
+  writeTree(syWs, '70002', { 'filelist.xml': flx('B', '1.5') });
+  writeTree(syInst, '70002', { 'filelist.xml': flx('B', '1.5', ' installtime="2000"') });
+  // 7003：Steam 有、Installed 压根没有 → 也算待安装
+  writeTree(syWs, '70003', { 'filelist.xml': flx('C', '3.0'), 'c.xml': '<c/>' });
+  // 7004：只剩 Installed（工坊那边没了）→ 没法同步，且不该进计划
+  writeTree(syInst, '70004', { 'filelist.xml': flx('D', '1.0', ' installtime="500"') });
+  // 7005：Steam 目录里没有 filelist.xml（下载残缺）→ 计划阶段就跳过
+  fs.mkdirSync(path.join(syWs, '70005'), { recursive: true });
+
+  fs.writeFileSync(
+    // .acf 在 workshopModsDir 往上两级（真实布局：steamapps\workshop\appworkshop_602960.acf）
+    path.join(syRoot, 'appworkshop_602960.acf'),
+    '"AppWorkshop"\n{\n\t"appid"\t\t"602960"\n\t"WorkshopItemDetails"\n\t{\n' +
+      '\t\t"70001"\n\t\t{\n\t\t\t"manifest"\t\t"11"\n\t\t\t"timeupdated"\t\t"2000"\n' +
+      '\t\t\t"latest_timeupdated"\t\t"2000"\n\t\t\t"latest_manifest"\t\t"11"\n\t\t}\n' +
+      '\t\t"70002"\n\t\t{\n\t\t\t"manifest"\t\t"22"\n\t\t\t"timeupdated"\t\t"2000"\n' +
+      '\t\t\t"latest_timeupdated"\t\t"2000"\n\t\t\t"latest_manifest"\t\t"22"\n\t\t}\n' +
+      '\t\t"70003"\n\t\t{\n\t\t\t"manifest"\t\t"33"\n\t\t\t"timeupdated"\t\t"3000"\n' +
+      '\t\t\t"latest_timeupdated"\t\t"3000"\n\t\t\t"latest_manifest"\t\t"33"\n\t\t}\n' +
+      '\t}\n}\n',
+    'utf8'
+  );
+
+  const syPlan = isync.planInstallSync(sySettings);
+  const syIds = syPlan.items.map((i) => i.id).sort();
+  ok(syPlan.acfAvailable, '读得到 .acf');
+  ok(syIds.join(',') === '70001,70003', `待同步的是 70001/70003（实际 ${syIds.join(',') || '（空）'}）`);
+  const syP1 = syPlan.items.find((i) => i.id === '70001');
+  ok(syP1 && syP1.reason === 'outdated', '70001 判为「有更新没装」');
+  ok(syP1 && syP1.installedVersion === '1.0' && syP1.steamVersion === '2.0', '带上新旧版本号供界面显示');
+  ok(syP1 && syP1.files === 3 && syP1.bytes > 0, `统计出文件数与体积（${syP1 && syP1.files} 个）`);
+  const syP3 = syPlan.items.find((i) => i.id === '70003');
+  ok(syP3 && syP3.reason === 'not-installed', '7003 判为「游戏里还没装过」');
+  ok(!syIds.includes('70002'), '已经同步过的不进计划');
+  ok(!syIds.includes('70004'), '只剩 Installed 的（工坊已没有来源）不进计划');
+  ok(syPlan.totalBytes > 0, '给出总体积');
+
+  const syRun = isync.runInstallSync(sySettings, syPlan.items);
+  ok(syRun.failed.length === 0, `没有失败项${syRun.failed.length ? '：' + JSON.stringify(syRun.failed) : ''}`);
+  ok(syRun.synced.length === 2, '同步了 2 个');
+
+  const inst1 = path.join(syInst, '70001');
+  const txt1 = fs.readFileSync(path.join(inst1, 'filelist.xml'), 'utf8');
+  ok(/installtime="2000"/.test(txt1), '游戏那份 filelist 写上了新的 installtime');
+  ok(/modversion="2\.0"/.test(txt1), '内容换成了 Steam 那份（modversion 2.0）');
+  ok(/expectedhash="ABCD"/.test(txt1), '其它属性没被动过');
+  ok(fs.readFileSync(path.join(inst1, 'items/b.xml'), 'utf8') === '<b/>', '新增的文件复制过来了');
+  ok(fs.readFileSync(path.join(inst1, 'items/a.xml'), 'utf8') === '<a/>', '旧文件被新版覆盖');
+  ok(!fs.existsSync(path.join(inst1, 'items/gone.xml')), '新版本里已删除的文件被清掉了（不是叠加）');
+  ok(fs.existsSync(path.join(syInst, '70003', 'filelist.xml')), '原本没装的 7003 也被装上了');
+  ok(
+    fs.readdirSync(syInst).filter((n) => n.startsWith('.bmm-sync-')).length === 0,
+    '同步完不留临时/备份目录'
+  );
+
+  // 幂等：再规划一次应该什么都没了 —— 这条最关键，否则界面会一直提示"有更新"
+  const syAgain = isync.planInstallSync(sySettings);
+  ok(syAgain.count === 0, `同步完再查应为 0 个（实际 ${syAgain.count}）`);
+
+  // BOM 与属性：writeInstallTime 不能破坏文件
+  const bomPath = path.join(TMP, 'sync-bom.xml');
+  fs.writeFileSync(bomPath, '\uFEFF<contentpackage name="X" modversion="1.0" expectedhash="E" />\n', 'utf8');
+  isync.writeInstallTime(bomPath, 4242);
+  const bomTxt = fs.readFileSync(bomPath, 'utf8');
+  ok(bomTxt.charCodeAt(0) === 0xfeff, 'BOM 被保留');
+  ok(/installtime="4242"/.test(bomTxt), '没有 installtime 时插进去');
+  ok(/expectedhash="E"/.test(bomTxt), '原来的属性都还在');
+  isync.writeInstallTime(bomPath, 5555);
+  const bomTxt2 = fs.readFileSync(bomPath, 'utf8');
+  ok(/installtime="5555"/.test(bomTxt2) && !/4242/.test(bomTxt2), '已有时覆盖而不是插第二个');
+  ok((bomTxt2.match(/installtime=/g) || []).length === 1, '不会出现两个 installtime');
+
+  // 失败项要如实报，并且不能破坏已有的安装
+  const badSettings = { ...sySettings, workshopModsDir: path.join(syRoot, 'empty-ws') };
+  fs.mkdirSync(path.join(badSettings.workshopModsDir, '90001'), { recursive: true });
+  const badRun = isync.runInstallSync(badSettings, [{ id: '90001', name: '残缺', targetTime: 1 }]);
+  ok(badRun.failed.length === 1, 'Steam 那份不完整时记为失败');
+  ok(!fs.existsSync(path.join(syInst, '90001')), '失败时不会留下半成品目录');
+
+  let badId = false;
+  try {
+    isync.syncOne(sySettings, { id: '../跑到外面', name: 'x', targetTime: 1 });
+  } catch {
+    badId = true;
+  }
+  ok(badId, '非法 id 被拒绝（防目录穿越）');
+
+  // 没有 .acf 时退回按版本号比较：明确不同才算
+  const noAcfWs = path.join(TMP, 'sync-noacf', '602960');
+  const noAcfInst = path.join(TMP, 'sync-noacf', 'Installed');
+  writeTree(noAcfWs, '80001', { 'filelist.xml': flx('E', '2.0') });
+  writeTree(noAcfInst, '80001', { 'filelist.xml': flx('E', '1.0', ' installtime="100"') });
+  writeTree(noAcfWs, '80002', { 'filelist.xml': flx('F', '1.0') });
+  writeTree(noAcfInst, '80002', { 'filelist.xml': flx('F', '1.0', ' installtime="100"') });
+  const noAcfPlan = isync.planInstallSync({ workshopModsDir: noAcfWs, installedWorkshopDir: noAcfInst });
+  const noAcfIds = noAcfPlan.items.map((i) => i.id);
+  ok(noAcfIds.includes('80001'), '.acf 丢了时：版本号不同 → 仍判为待同步');
+  ok(!noAcfIds.includes('80002'), '.acf 丢了时：版本号相同 → 不乱判');
+  ok(
+    noAcfPlan.items.find((i) => i.id === '80001').reason === 'version-differs',
+    '标注是按版本号兜底判出来的'
   );
 } catch (e) {
   console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));

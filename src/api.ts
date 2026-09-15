@@ -17,7 +17,11 @@ import type {
   ModInfo,
   AppliedInfo,
   WorkshopCheckRefresh,
-  SaveList
+  SaveList,
+  InstallSyncPlan,
+  InstallSyncItem,
+  InstallSyncProgress,
+  InstallSyncResult
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -45,7 +49,9 @@ let state = {
   relations: {
     'workshop:3100128373': ['workshop:2559634234', 'workshop:2683570256']
   } as Record<string, string[]>,
-  apiKey: ''
+  apiKey: '',
+  /** 预览模式：点过「同步到游戏」之后就不再提示待同步 */
+  syncDone: false
 };
 
 /** 预览模式：把第一个合集的内容当作「游戏当前应用」的 mod */
@@ -121,6 +127,25 @@ function mockUpdateState(): UpdateState {
   };
 }
 
+/** 预览模式用：把版本号最后一段 +1，好演示「游戏里 v1.0 → Steam v1.1」 */
+function bumpVersion(v: string | null | undefined): string {
+  const s = String(v || '1.0');
+  const parts = s.split('.');
+  const last = Number(parts[parts.length - 1]);
+  if (Number.isFinite(last)) parts[parts.length - 1] = String(last + 1);
+  else parts.push('1');
+  return parts.join('.');
+}
+
+/** 预览模式用：把版本号最后一段 -1（演示「游戏里装的是旧版」） */
+function prevVersion(v: string | null | undefined): string {
+  const s = String(v || '1.0');
+  const parts = s.split('.');
+  const last = Number(parts[parts.length - 1]);
+  if (Number.isFinite(last)) parts[parts.length - 1] = String(Math.max(0, last - 1));
+  return parts.join('.');
+}
+
 const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.settings }),
   saveSettings: async (s: AppSettings): Promise<ScanResult> => {
     state.settings = { ...s };
@@ -137,6 +162,9 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
     const localWsIds = new Set(
       state.mods.filter((m) => m.source === 'local' && m.steamworkshopid).map((m) => m.steamworkshopid!)
     );
+    // 预览模式：拿第一个工坊 mod 假装「Steam 已下载、游戏还没装」，好把「同步到游戏」撑起来
+    const pendingId =
+      state.syncDone ? null : state.mods.find((m) => m.source === 'workshop')?.id || null;
     // 每次返回全新的数组/对象，跟真实后端 scanAll() 的行为一致。
     // 否则 useMemo 按引用比较会认为数据没变，界面不会重算 —— 比如更新完 mod 后
     // 「有更新」的数量不会往下掉。
@@ -147,7 +175,10 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
           m.source === 'workshop'
             ? isDelistedMock(checks, m.id)
             : isDelistedMock(checks, m.steamworkshopid),
-        backedUpLocally: m.source === 'workshop' ? localWsIds.has(m.id) : true
+        backedUpLocally: m.source === 'workshop' ? localWsIds.has(m.id) : true,
+        installPending: m.source === 'workshop' && m.id === pendingId,
+        installInstalledVersion:
+          m.source === 'workshop' && m.id === pendingId ? prevVersion(m.modVersion) : null
       })),
       modlists: summaries(),
       categories: {
@@ -163,7 +194,8 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       checksDelisted: Object.values(checks).filter((c) => c.exists === false).length,
       checksUnknown: 0,
       checksMode: state.apiKey ? 'apikey' : 'page',
-      checksCheckedAt: Date.now()
+      checksCheckedAt: Date.now(),
+      installPendingCount: pendingId ? 1 : 0
     };
   },
 
@@ -435,6 +467,48 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   },
   cancelWorkshopBackup: async (): Promise<boolean> => true,
   onBackupProgress: (_cb: (p: BackupProgress) => void): void => {},
+
+  // 预览模式：假装有一个工坊 mod 的更新躺在 Steam 里还没装进游戏
+  planInstallSync: async (): Promise<InstallSyncPlan> => {
+    const m = state.syncDone ? null : state.mods.find((x) => x.source === 'workshop');
+    const items: InstallSyncItem[] = m
+      ? [
+          {
+            id: m.id,
+            name: m.name,
+            reason: 'outdated',
+            steamVersion: m.modVersion || null,
+            installedVersion: prevVersion(m.modVersion),
+            installedTime: 1789125745,
+            targetTime: 1789472317,
+            bytes: 61969352,
+            files: 980
+          }
+        ]
+      : [];
+    return {
+      items,
+      count: items.length,
+      totalBytes: items.reduce((s, x) => s + x.bytes, 0),
+      totalFiles: items.reduce((s, x) => s + x.files, 0),
+      acfAvailable: true,
+      acfReason: null,
+      workshopDir: '（预览模式）\\steamapps\\workshop\\content\\602960',
+      installedDir: '（预览模式）\\WorkshopMods\\Installed'
+    };
+  },
+  startInstallSync: async (): Promise<InstallSyncResult> => {
+    const p = await mockApi.planInstallSync();
+    state.syncDone = true; // 预览模式：同步完就不该再提示
+    return {
+      synced: p.items.map((i) => ({ id: i.id, name: i.name, installTime: i.targetTime })),
+      failed: [],
+      bytes: p.totalBytes,
+      cancelled: false
+    };
+  },
+  cancelInstallSync: async (): Promise<boolean> => true,
+  onInstallSyncProgress: (_cb: (p: InstallSyncProgress) => void): (() => void) => () => {},
 
   // 预览模式：给一段示例描述，用来展示工坊描述的排版效果
   getWorkshopDetails: async (id: string): Promise<WorkshopDetails | null> => {

@@ -22,6 +22,7 @@ const {
 } = require('./modlists');
 const { applyToGame, readAppliedPackages } = require('./config');
 const { listSaves } = require('./saves');
+const { installStatus, planInstallSync, runInstallSync } = require('./installsync');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -192,6 +193,10 @@ function scanAll() {
   const mods = [...workshop, ...installedOnly, ...local];
   // 哪些工坊 mod 已经有一份对应的本地副本（= 已经备份过了）
   const localWsIds = new Set(local.map((m) => m.steamworkshopid).filter(Boolean));
+  // 「Steam 已下载、游戏还没装」的检测：需要 .acf 里的 timeupdated 对 Installed 的 installtime。
+  // 只读小文件，比扫 mod 目录便宜得多，所以放进扫描里，界面才能随时显示数量。
+  const acfForInstall = fs.existsSync(s.workshopModsDir) ? readWorkshopAcf(s.workshopModsDir) : null;
+  let installPendingCount = 0;
   for (const m of mods) {
     const key = `${m.source}:${m.id}`;
     m.categories = Array.isArray(cats.mods[key]) ? [...cats.mods[key]] : [];
@@ -208,6 +213,15 @@ function scanAll() {
     m.delistedHow = m.delisted && entry ? entry.how || null : null;
     // 工坊 mod：本地是否已经有一份备份（有的话就不算"有风险"）
     m.backedUpLocally = m.source === 'workshop' ? localWsIds.has(m.id) : true;
+    // 工坊 mod：Steam 那份已经下载了、但游戏 Installed 里还是旧的（或压根没装）
+    m.installPending = false;
+    m.installInstalledVersion = null;
+    if (m.source === 'workshop' && !m.installedOnly && acfForInstall) {
+      const st = installStatus(s, acfForInstall, m);
+      m.installPending = st.pending;
+      m.installInstalledVersion = st.installedVersion;
+      if (st.pending) installPendingCount++;
+    }
   }
 
   // 生效列表里有、但当前目录找不到的（被删了或者没装）
@@ -247,7 +261,9 @@ function scanAll() {
     checksUnknown: checkValues.filter((c) => c && c.exists === null).length,
     /** 检查方式：有 API Key 走官方接口，没有就抓网页 */
     checksMode: getApiKey(userDataDir()) ? 'apikey' : 'page',
-    checksCheckedAt: checkValues.reduce((max, c) => Math.max(max, (c && c.checkedAt) || 0), 0)
+    checksCheckedAt: checkValues.reduce((max, c) => Math.max(max, (c && c.checkedAt) || 0), 0),
+    /** Steam 已下载、游戏还没装的工坊 mod 个数（详情在 installsync:plan 里） */
+    installPendingCount
   };
 }
 
@@ -649,6 +665,41 @@ function registerIpc() {
 
   ipcMain.handle('backup:cancel', () => {
     backupCancelled = true;
+    return true;
+  });
+
+  /* ------------------- 把 Steam 已下载的工坊更新同步进游戏 ------------------- */
+
+  let syncRunning = false;
+  let syncCancelled = false;
+
+  /** 只查不写：列出「Steam 已下载、游戏还没装」的 mod 及体积 */
+  ipcMain.handle('installsync:plan', (event) =>
+    planInstallSync(getSettings(), {
+      onStep: (done, total, current) =>
+        send(event.sender, 'installsync:progress', { phase: 'planning', done, total, current })
+    })
+  );
+
+  ipcMain.handle('installsync:start', (event) => {
+    if (syncRunning) throw new Error('已有同步任务在进行中');
+    const s = getSettings();
+    const sender = event.sender;
+    syncRunning = true;
+    syncCancelled = false;
+    try {
+      const plan = planInstallSync(s);
+      return runInstallSync(s, plan.items, {
+        onProgress: (p) => send(sender, 'installsync:progress', p),
+        isCancelled: () => syncCancelled
+      });
+    } finally {
+      syncRunning = false;
+    }
+  });
+
+  ipcMain.handle('installsync:cancel', () => {
+    syncCancelled = true;
     return true;
   });
 

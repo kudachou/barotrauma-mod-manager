@@ -41,6 +41,13 @@
 **启动游戏**
 - 顶部「启动游戏」一键拉起潜渊症；找不到 exe 时自动交回 Steam 启动
 
+**同步到游戏**
+- 游戏只在你**自己在 mod 列表里按更新键**时才装工坊更新，实测能拖好几天；
+  这个按钮把「Steam 已经下载好、游戏还没装」的更新直接装进 `WorkshopMods\Installed`
+  - 顶部只在**真有**待同步的 mod 时出现，带数量；卡片上也会标「待同步到游戏」
+  - 先列出待同步的 mod 和体积（版本变化写成 `游戏里 v1.110 → Steam v1.111`），确认后才动手
+  - 与游戏内更新等价，但**不会让 Steam 把整包重下一遍**（少下 59 MB 那种）
+
 **存档**
 - **看每个存档当时启用了哪些 mod**：直接解析 `.save`（gzip 压缩的 XML）里的
   `selectedcontentpackagenames`，按**加载顺序**列出，并标出哪些 mod 现在游戏里已经没有了
@@ -67,6 +74,8 @@
 ![合集](docs/screenshot-collections.png)
 
 ![存档](docs/screenshot-saves.png)
+
+![同步到游戏](docs/screenshot-sync.png)
 
 ## 运行
 
@@ -275,25 +284,47 @@ ERROR: Cannot create symbolic link … 客户端没有所需的特权。
 没填 Key 时逐个抓网页，只能把「看不到」标成「工坊不可见」，不敢断言已下架。
 结果缓存在 `userData/workshop-checks.json`，扫描时读缓存不联网；核实不出来的会退避重试。
 
-### 为什么不做一个「把工坊更新同步进游戏」的功能
-
-曾经做过，后来移除了。原因是实测发现**那个中间态根本不存在**：
+### 为什么**有**「同步到游戏」这个功能（以及一次被推翻的结论）
 
 Steam 把订阅的 mod 下载到 `steamapps\workshop\content\<appid>\<id>`，
-而游戏加载的是自己的 `…\Barotrauma\WorkshopMods\Installed\<id>`（它会写一个 `installtime`）。
-看起来像是「Steam 下好了、游戏还没复制」有个空档可以帮忙 —— 但实测：
+游戏加载的却是自己的 `…\Barotrauma\WorkshopMods\Installed\<id>`（游戏会在里面写一个 `installtime`）。
+所以「Steam 已经下好了新版、游戏里还是旧的」这个中间态**确实存在**。
+
+> ⚠️ 这个功能历史上被删过一次，理由是「中间态不存在」。**那个结论是错的** ——
+> 它测的是**新订阅**：订阅后游戏 1 秒内就自己复制进 `Installed`，看起来没有空档。
+> 但**已有 mod 的更新**完全是另一回事：游戏会一直等你**自己在 mod 列表里按更新键**。
+> 2026-09-16 用一次真实更新（`MY_Item` / id 3680309446）复测：
 
 ```
-工坊条目 3801589375 发布后
-  Steam 订阅目录： 13:35:40
-  Installed：      13:35:41     ← 相差 1 秒
-  .acf 的 timeupdated   = 1789392938
-  Installed installtime = 1789392938   ← 完全一致
+                         modversion   内容时间            installtime
+  Steam 订阅目录          1.111      9/15 19:48         （无）
+  游戏 Installed          1.110      9/13 17:07         1789125745 (9/11 19:22)
+  .acf: timeupdated == latest_timeupdated == 1789472317 (9/15 19:38)   ← Steam 早就下载完了
 ```
 
-**下载完 1 秒内游戏就自己复制过去了**，而且下载本身也是游戏触发的
-（游戏不在运行时，工坊更新只会躺在那里等着）。
-所以这个功能既插不进手，也会让人误以为管理器能管更新流程。
+**拖了 4 天**没装。按下游戏里的更新键之后，Steam 自己的日志（`logs\content_log.txt`）：
+
+```
+[00:54:49] AppID 602960 Workshop update changed : Running Update,Downloading,Staging,
+[00:54:49] Downloading 959 chunks for depot 602960 (6830006565699137265)
+[00:54:49] HTTP (CDN) … AuthenticateDepotID (602960) - Success!
+[00:55:04] starting commit … : 980 updated, 0 moved, 0 deleted files
+```
+
+也就是说那个按键会**先让 Steam 把整包重下一遍**（59 MB、15 秒），提交完 1 秒后游戏才把文件
+复制进 `Installed` 并写上 `installtime`（= `.acf` 的 `timeupdated`，实测两者精确相等）。
+
+管理器的做法与游戏一致，但省掉 Steam 那次多余的整包重下：
+
+- **判定**：`Installed\<id>\filelist.xml` 的 `installtime` != `.acf` 里该 id 的 `timeupdated`
+  （`filelist.xml` 不存在即「游戏还没装过」也算）。实测 101 个 mod 精准命中那 1 个待安装的。
+  `.acf` 读不到时退回按 `modversion` 比较，只敢在明确不同时判为待同步。
+- **写入**：整份复制 Steam 那份（不是只覆盖变化的文件 —— 更新也可能**删**文件），
+  再把 `installtime` 写进 `filelist.xml`。为了不出现"复制到一半"的残缺目录，
+  先复制到同盘的临时目录，成功了再改名换过去；失败会把旧的换回来。
+- **幂等**：同步完再查就是 0 个（自检里有这条断言），不会一直提示"有更新"。
+- **风险**：游戏正在运行且该 mod 里有已加载的 `dll`（比如 LuaCs）时文件会被系统锁住，
+  那种情况界面会明确报「文件被占用 —— 关掉游戏后重试」。
 
 ### 存档里记录的 mod 名单（以及为什么不能用「完全一致」判对应合集）
 
@@ -346,6 +377,11 @@ Steam 把订阅的 mod 下载到 `steamapps\workshop\content\<appid>\<id>`，
 **Q：应用合集后游戏里没生效？**
 A：确认「设置」里的 `config_player.xml` 指向的是游戏根目录下那份，并且改完之后重启游戏。
 
+**Q：工坊 mod 明明更新了，游戏里还是旧版？**
+A：游戏不会自动装——要你在 mod 列表里自己按更新键（实测能拖好几天）。管理器会在顶部显示
+   「同步到游戏 N」，点一下就能装好，而且不会让 Steam 把整包重下一遍。
+   如果同步报「文件被占用」，先关掉游戏再点一次。
+
 **Q：某些 mod 没有封面？**
 A：Steam 接口对该条目没返回封面图（部分 mod 本来就没上传预览图），会显示占位色块。
 
@@ -372,6 +408,7 @@ electron/            主进程
     modlists.js      合集文件读写
     config.js        应用到 config_player.xml
     saves.js         解析 .save，读出「这个存档当时启用了哪些 mod」
+    installsync.js   把 Steam 已下载、游戏还没装的工坊更新同步进 Installed
     steam.js         工坊封面（公开接口 + 缓存）
     categories.js    分类规则与标签持久化
     relations.js     mod 之间的关联（前置需求）
@@ -396,6 +433,7 @@ pnpm exec electron scripts/shots.cjs         # 界面截图 + 滚动/交互校�
 pnpm exec electron scripts/test-desc-scroll.cjs  # 工坊描述能否真的滚（发真实滚轮事件）
 pnpm exec electron scripts/test-apply-ui.cjs     # 「应用到游戏」点一次界面就更新（隔离临时目录）
 pnpm exec electron scripts/test-saves-ui.cjs     # 存档页：解析、对应合集、两个动作（隔离临时存档）
+pnpm exec electron scripts/test-sync-ui.cjs      # 工坊更新同步进游戏（隔离临时目录）
 ```
 
 `test-apply-ui.cjs` 是为了用户反馈的那个坑留下的：**点一次「应用到游戏」，config 确实写进去了，
@@ -413,9 +451,15 @@ IPC，断言「点击前 0 个『当前应用』徽章 → 点一次后立刻 1 
 「完全一致」与「完全覆盖」的判定、多出来的 mod 要按**真名**列出、「存为新合集」在名字被占用时
 自动改名（绝不覆盖已有合集）、「按存档启用」真的写进了 config。
 
+`test-sync-ui.cjs` 用**假装成 Steam 订阅目录 / 游戏 Installed 的临时目录**跑真实 IPC：
+顶栏只在有待同步时出现、卡片标记、弹窗里的版本变化与体积、同步后 `installtime` 与内容都写对、
+旧文件被清掉、不留 `.bmm-sync-*` 临时目录、同步完提示消失、再查为 0。
+
 `test-backend.cjs` 覆盖了 `filelist.xml` 解析（含单引号、老格式 `version` 属性、BOM、
 以及 `modversion` 被 `gameversion` 误匹配的经典坑）、版本比较、合集往返、
 以及「应用到 config 时区域外逐字节不变 / BOM 保留 / 缺段中止 / 备份只留一个且不累积」。
+第 13 节专测同步：只在真有待同步时才进计划、**新版本里删掉的文件会被清掉**（不是叠加）、
+`installtime` 写入与覆盖、BOM 保留、失败不留半成品目录、非法 id 被拒、**同步完再查为 0（幂等）**。
 
 要指定游戏目录时可用环境变量 `BMM_GAME_DIR` / `BMM_WORKSHOP_DIR`。
 

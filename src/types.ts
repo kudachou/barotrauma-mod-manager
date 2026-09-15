@@ -43,6 +43,10 @@ export interface ModInfo {
   installedOnly?: boolean;
   /** LocalMods 里已经有一份对应的备份（工坊 mod 才看这个） */
   backedUpLocally?: boolean;
+  /** Steam 那份已经下载好了、但游戏 Installed 里还是旧的（或压根没装） */
+  installPending?: boolean;
+  /** 游戏 Installed 里那一份的版本号（用于显示「1.110 → 1.111」） */
+  installInstalledVersion?: string | null;
 }
 
 export interface ModlistEntry {
@@ -124,9 +128,53 @@ export interface ScanResult {
   checksMode?: 'apikey' | 'page';
   /** 上次检查的时间戳 */
   checksCheckedAt?: number;
+  /** 「Steam 已下载、游戏还没装」的工坊 mod 个数 */
+  installPendingCount?: number;
 }
 
 export type ViewKey = 'library' | 'collections' | 'saves' | 'settings';
+
+/* ---------------------- 工坊更新同步进游戏（install sync） ---------------------- */
+
+export type InstallSyncReason = 'outdated' | 'not-installed' | 'version-differs';
+
+export interface InstallSyncItem {
+  id: string;
+  name: string;
+  reason: InstallSyncReason;
+  steamVersion: string | null;
+  installedVersion: string | null;
+  installedTime: number | null;
+  targetTime: number | null;
+  bytes: number;
+  files: number;
+}
+
+export interface InstallSyncPlan {
+  items: InstallSyncItem[];
+  count: number;
+  totalBytes: number;
+  totalFiles: number;
+  acfAvailable: boolean;
+  acfReason: string | null;
+  workshopDir: string;
+  installedDir: string;
+}
+
+export interface InstallSyncProgress {
+  phase: string;
+  done: number;
+  total: number;
+  current: string | null;
+  id?: string;
+}
+
+export interface InstallSyncResult {
+  synced: { id: string; name: string; installTime: number | null }[];
+  failed: { id: string; name: string; error: string }[];
+  bytes: number;
+  cancelled: boolean;
+}
 
 /* --------------------------------- 存档 --------------------------------- */
 

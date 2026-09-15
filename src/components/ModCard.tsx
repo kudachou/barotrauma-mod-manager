@@ -3,7 +3,7 @@ import type { ModInfo } from '../types';
 import { imgSrc, placeholderHue } from '../api';
 import { categoryStyle } from '../categories';
 import { compareBadge, initials, uniq } from '../ui';
-import { IconAlert, IconCheck } from './Icons';
+import { IconAlert, IconCheck, IconDownload } from './Icons';
 
 export default function ModCard({ mod, onOpen }: { mod: ModInfo; onOpen: (m: ModInfo) => void }) {
   // 封面加载失败（缓存被清掉、cdn 链接失效等）时回落到占位图，而不是留个破图
@@ -52,6 +52,19 @@ export default function ModCard({ mod, onOpen }: { mod: ModInfo; onOpen: (m: Mod
                   : mod.backedUpLocally
                     ? '已下架 · 已备份'
                     : '已下架 · 待备份'}
+            </span>
+          )}
+          {mod.installPending && (
+            <span
+              className="badge st-older"
+              title={`Steam 已经下载好了这个更新（${
+                mod.installInstalledVersion
+                  ? `游戏里装的还是 v${mod.installInstalledVersion}`
+                  : '游戏里还没装过'
+              }），但游戏要你在 mod 列表里按更新键才会装。点顶部「同步到游戏」可以直接装好`}
+            >
+              <IconDownload size={11} />
+              待同步到游戏
             </span>
           )}
           {mod.installedOnly && !mod.backedUpLocally && (

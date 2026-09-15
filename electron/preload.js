@@ -81,6 +81,17 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('backup:progress', (_e, progress) => cb(progress));
   },
 
+  // 把 Steam 已下载、游戏还没装的工坊更新同步进 Installed
+  planInstallSync: () => invoke('installsync:plan'),
+  startInstallSync: () => invoke('installsync:start'),
+  cancelInstallSync: () => invoke('installsync:cancel'),
+  onInstallSyncProgress: (cb) => {
+    const handler = (_e, progress) => cb(progress);
+    ipcRenderer.on('installsync:progress', handler);
+    // 返回取消订阅，弹窗关掉时别把监听留在那儿
+    return () => ipcRenderer.removeListener('installsync:progress', handler);
+  },
+
   // 更新
   updaterStatus: () => invoke('updater:status'),
   updaterCheck: () => invoke('updater:check'),

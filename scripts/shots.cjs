@@ -790,6 +790,42 @@ app.whenReady().then(async () => {
   );
   await shot(win, '20-saves');
 
+  /* --------------------------- 同步到游戏弹窗 --------------------------- */
+  // 预览模式的示例数据里有一个「Steam 已下载、游戏还没装」的 mod，顶栏会出现这个按钮
+  const openedSync = await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.topbar button')).find((x) =>
+      x.textContent.includes('同步到游戏')
+    );
+    if (!b) return false;
+    b.click();
+    return true;
+  })()`);
+  await sleep(900);
+  console.log(
+    'installsync=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => ({
+          opened: ${JSON.stringify(openedSync)},
+          title: (document.querySelector('.modal-title') || {}).textContent || null,
+          rows: Array.from(document.querySelectorAll('.modal .bk-row')).map((x) =>
+            x.textContent.replace(/\\s+/g, ' ').trim()
+          ),
+          buttons: Array.from(document.querySelectorAll('.modal-foot button')).map((x) =>
+            x.textContent.trim()
+          )
+        }))()`)
+      )
+  );
+  await shot(win, '22-sync-modal');
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot button')).find((x) =>
+      x.textContent.trim() === '取消'
+    );
+    if (b) b.click();
+    return !!b;
+  })()`);
+  await sleep(400);
+
   console.log('ERRORS ' + JSON.stringify(errors, null, 1));
   app.exit(0);
 });
