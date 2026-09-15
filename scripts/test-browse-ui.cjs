@@ -175,6 +175,24 @@ app.whenReady().then(async () => {
   );
   ok(/非法的工坊 id/.test(badId), '非法 id 被主进程拒绝（不让外部字符串拼 steam:// 命令）');
 
+  // 详情与翻译走**真实 IPC**：老接口（无 key 也能用）给描述；翻译走 MyMemory 免费接口
+  const d = await win.webContents.executeJavaScript(
+    `window.api.getWorkshopDetails('2559634234', true)
+       .then((r) => (r ? { len: (r.description || '').length, localized: !!r.localized } : null))
+       .catch((e) => 'ERR ' + String(e.message || e))`
+  );
+  ok(d && d.len > 100, '详情能拿到工坊描述（真实 IPC）', JSON.stringify(d));
+  const t = await win.webContents.executeJavaScript(
+    `window.api.translateText('Adds a new submarine and some weapons. This mod is client-side only.')
+       .then((r) => JSON.stringify(r))
+       .catch((e) => 'ERR ' + String(e.message || e))`
+  );
+  ok(
+    /[\u4e00-\u9fff]/.test(t),
+    '翻译接口返回中文（MyMemory 免费接口）',
+    String(t).slice(0, 140)
+  );
+
   ok(errors.length === 0, '渲染进程没有报错', errors.join(' | '));
 
   console.log(`\n=== ${fail === 0 ? '全部通过' : fail + ' 项失败'}（${pass} 通过 / ${fail} 失败）===`);

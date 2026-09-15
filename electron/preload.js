@@ -31,8 +31,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('previews:ready', (_e, payload) => cb(payload));
   },
 
-  // 工坊详情（描述 / 标签 / 热度）
+  // 工坊详情（描述 / 标签 / 热度）；配了 API Key 时描述会是中文（本地化版本）
   getWorkshopDetails: (id, force) => invoke('workshop:details', id, force),
+  // 把描述翻译成中文（作者没提供中文版时用）
+  translateText: (text) => invoke('translate:text', text),
 
   // 刷新「工坊条目还在不在」的缓存
   refreshWorkshopChecks: () => invoke('workshop:refreshChecks'),

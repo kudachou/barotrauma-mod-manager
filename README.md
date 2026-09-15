@@ -56,6 +56,10 @@
     而且**必须能访问 Steam**（国内一般需要加速器，否则提示「连不上 Steam」）
   - 分类标签**不是硬编码**：抓 3 个榜单各 100 条统计出来的（缓存 6 小时），Steam 那边改标签能自动跟上
 - 卡片上标出「已有」（本地库里已经有这个条目），还能看订阅数/收藏数/更新日期/分类
+- **描述语言**：配了 Steam Web API Key 时走 `GetDetails` + `language=6`，直接拿**作者写的中文描述**
+  （老接口 `GetPublishedFileDetails` 没有 language 参数，永远只给英文 —— 这就是以前"管理器英文、Steam 中文"的原因）
+  - 作者没写中文的条目会退回首语言，界面标成「只有原文」并给一个**「翻译成中文」**按钮
+    （免费接口 MyMemory，按字节分块翻长描述、结果缓存；谷歌/必应的端点实测在国内不可用）
 - **点卡片看详情**：封面 + **截图画廊**（点缩略图可切换）、订阅/收藏/浏览/创建日期、分类标签，
   以及**工坊描述的完整排版**（BBCode → 安全节点，跟 Mod 详情页同一套渲染）
   - 描述来自 `GetPublishedFileDetails`（带 BBCode 描述）；**截图那个接口不给**，
@@ -435,6 +439,7 @@ electron/            主进程
     workshopbrowse.js 浏览创意工坊（QueryFiles：搜索/排序/分类统计）
     openinsteam.js    在 Steam 客户端里打开工坊页面（直接调 steam.exe）
     workshoppage.js   从工坊页面 HTML 里抽封面与截图（详情弹窗用）
+    translate.js      描述没有中文版时用免费接口翻译成中文
     steam.js         工坊封面（公开接口 + 缓存）
     categories.js    分类规则与标签持久化
     relations.js     mod 之间的关联（前置需求）

@@ -26,6 +26,7 @@ const { installStatus, pendingSyncOf, planInstallSync, runInstallSync } = requir
 const { browse: browseWorkshop, browseTags: browseWorkshopTags } = require('./workshopbrowse');
 const { openWorkshopInSteam } = require('./openinsteam');
 const { getMedia: getWorkshopMedia } = require('./workshoppage');
+const { translateToChinese } = require('./translate');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -436,7 +437,17 @@ function registerIpc() {
   /* ------------------------------ 工坊详情 ------------------------------ */
 
   ipcMain.handle('workshop:details', (_e, id, force) =>
-    getWorkshopDetails(id, path.join(userDataDir(), 'workshop'), { force: !!force })
+    getWorkshopDetails(id, path.join(userDataDir(), 'workshop'), {
+      force: !!force,
+      // 配了 key 就拿**本地化（中文）**描述 —— 老接口永远只给英文，这就是
+      // 「管理器显示英文、Steam 显示中文」的原因
+      apiKey: getApiKey(userDataDir())
+    })
+  );
+
+  /** 把描述翻译成中文（作者没提供中文版时的兜底） */
+  ipcMain.handle('translate:text', (_e, text) =>
+    translateToChinese(text, { cacheDir: path.join(userDataDir(), 'translations') })
   );
 
   /** 联网刷新「工坊条目还在不在」的缓存（作者下架后就查不到了） */

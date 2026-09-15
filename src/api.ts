@@ -586,6 +586,15 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
     ]
   }),
 
+  // 预览模式：假装翻译了一下（真实翻译走 MyMemory 免费接口）
+  translateText: async (
+    text: string
+  ): Promise<{ ok: boolean; text: string; chunks: number; cached?: boolean; error?: string }> => ({
+    ok: true,
+    text: `【预览模式的示例翻译】${String(text || '').slice(0, 120)}`,
+    chunks: 1
+  }),
+
   // 预览模式：没有截图（线上要读工坊页面），但只要不报错，详情弹窗就能走通
   getWorkshopMedia: async (id: string, _force?: boolean): Promise<WorkshopMedia> => ({
     id: String(id || ''),
@@ -603,48 +612,52 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       id,
       title: m.name,
       description: [
-        '[h1]关于这个 mod[/h1]',
-        '[b]这是预览模式下的示例描述[/b]，用来展示工坊描述的排版效果。真实运行时这里显示 mod 作者写的原文，',
-        '长度动辄几千字（例如 LuaCsForBarotrauma 就有 6500 多字），所以这里刻意写长一点，用来验证超长描述的显示。',
+        // 预览模式刻意用**英文**描述：真实场景里作者常常只写了英文，
+        // 界面要能正确显示「只有原文」+「翻译成中文」按钮
+        '[h1]About this mod[/h1]',
+        '[b]This is the sample description used in preview mode[/b], showing how a workshop description is laid out. ' +
+          'At runtime this is whatever the author wrote, often several thousand characters ' +
+          '(LuaCsForBarotrauma has about 6,500), so this sample is deliberately long to exercise long-description layout.',
         '',
-        '[h2]功能[/h2]',
+        '[h2]Features[/h2]',
         '[list]',
-        '[*]新增了一批物品与装备',
-        '[*]调整了部分数值平衡',
-        '[*]修复了若干已知问题',
-        '[*]优化了界面布局与操作手感',
-        '[*]补充了中文翻译',
+        '[*]Adds a batch of new items and equipment',
+        '[*]Rebalances part of the damage numbers',
+        '[*]Fixes several known issues',
+        '[*]Improves the UI layout and handling',
+        '[*]Includes translated text',
         '[/list]',
         '',
-        '[h2]前置与兼容[/h2]',
-        '需要 [b]LuaCsForBarotrauma[/b] 作为前置。',
-        '详细说明见 [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2559634234]这个页面[/url]。',
+        '[h2]Requirements and compatibility[/h2]',
+        'Requires [b]LuaCsForBarotrauma[/b].',
+        'See [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2559634234]this page[/url] for details.',
         '',
-        '[h2]安装说明[/h2]',
-        '订阅之后在游戏内的 mod 列表里勾选启用即可。如果同时装了其它修改同类内容的 mod，',
-        '请注意加载顺序：本 mod 应当排在它们[b]之后[/b]加载，否则改动会被覆盖。',
+        '[h2]Installation[/h2]',
+        'Subscribe and enable it in the in-game mod list. If you also run mods that change the same content, ' +
+          'mind the load order: this mod should load [b]after[/b] them, otherwise its changes get overwritten.',
         '',
-        '[h2]常见问题[/h2]',
+        '[h2]FAQ[/h2]',
         '[list]',
-        '[*]问：报错找不到某个文件？答：确认前置 mod 已启用。',
-        '[*]问：改了配置没生效？答：退出游戏后重新应用一次合集。',
-        '[*]问：和某某 mod 冲突？答：把本 mod 挪到列表更靠下的位置。',
+        '[*]Q: It reports a missing file? A: Make sure the required mod is enabled.',
+        '[*]Q: My config change did nothing? A: Quit the game and apply the collection again.',
+        '[*]Q: It conflicts with another mod? A: Move this mod further down the list.',
         '[/list]',
         '',
-        '[h3]更新记录[/h3]',
+        '[h3]Changelog[/h3]',
         '[list]',
-        '[*]修正了若干贴图错位',
-        '[*]新增两件装备',
-        '[*]调整了掉落概率',
+        '[*]Fixed several misplaced textures',
+        '[*]Added two pieces of equipment',
+        '[*]Adjusted drop rates',
         '[/list]',
         '',
-        '[quote]如果你觉得这个 mod 还不错，欢迎去工坊点个收藏。[/quote]',
+        '[quote]If you like this mod, consider adding it to your favorites. [/quote]',
         '',
         '[hr][/hr]',
-        '[i]最后更新：示例数据。这一段是用来说明「展开后应当由弹窗整体滚动，而不是在一个小框里再套一层滚动条」。[/i]'
+        '[i]This section exists to verify that a long description scrolls the whole dialog instead of nesting its own scrollbar.[/i]'
       ].join('\n'),
       previewUrl: null,
       tags: m.autoCategories,
+      localized: false, // 预览：作者没写中文，界面应该给出「翻译成中文」
       timeCreated: Math.floor(Date.now() / 1000) - 86400 * 400,
       timeUpdated: Math.floor(Date.now() / 1000) - 86400 * 12,
       fileSize: 42 * 1024 * 1024,

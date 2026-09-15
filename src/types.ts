@@ -354,6 +354,8 @@ export interface WorkshopDetails {
   views: number;
   banned: boolean;
   banReason: string | null;
+  /** 这份描述是不是本地化过的（用 API Key 走 GetDetails 时才可能为 true） */
+  localized?: boolean;
   /** 缓存时间戳 */
   fetchedAt?: number;
 }

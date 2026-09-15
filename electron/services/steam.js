@@ -157,12 +157,78 @@ async function fetchDetails(ids, options = {}) {
 }
 
 /**
+ * 用 `IPublishedFileService/GetDetails` 取**本地化**的标题与描述。
+ *
+ * 为什么需要它：老接口 `ISteamRemoteStorage/GetPublishedFileDetails` **没有 language 参数**，
+ * 永远返回作者写的基础语言（基本是英文）；而玩家在 Steam 客户端/页面里看到的是本地化版本。
+ * 这就是「管理器显示英文、Steam 显示中文」的原因。
+ *
+ * 实测（2026-09-16，language=6 简体中文）：
+ * ```
+ *   Soundproof Walls 2.0   默认 7493 字/0 中文   →  简中 3341 字/1920 中文
+ *   Press R to Reload      默认 3445 字/0 中文   →  简中 1986 字/572 中文（标题也变成「按R换弹」）
+ *   Barotraumatic          默认 5526 字/0 中文   →  简中 3189 字/1659 中文
+ * ```
+ * 没有中文版的条目会退回基础语言（LuaCs 就是），所以可以放心优先用它。
+ * 代价：这个接口要 key（没 key 直接 403），没配 key 时只能退回老接口。
+ */
+async function fetchLocalizedDetails(ids, options = {}) {
+  const { key, language = 6 } = options;
+  const out = new Map();
+  const list = Array.from(new Set((ids || []).map(String).filter(Boolean)));
+  if (!key) return out;
+
+  for (let i = 0; i < list.length; i += API_BATCH) {
+    const chunk = list.slice(i, i + API_BATCH);
+    const qs =
+      `key=${encodeURIComponent(key)}&language=${encodeURIComponent(language)}` +
+      chunk.map((id, k) => `&publishedfileids[${k}]=${encodeURIComponent(id)}`).join('');
+    let json;
+    try {
+      const res = await request(
+        `https://api.steampowered.com/IPublishedFileService/GetDetails/v1/?${qs}`,
+        { headers: { Accept: 'application/json' } }
+      );
+      json = JSON.parse(res.buf.toString('utf8'));
+    } catch {
+      continue; // 这一批拿不到就跳过，交给调用方退回老接口
+    }
+    const details = (json && json.response && json.response.publishedfiledetails) || [];
+    for (const d of details) {
+      if (!d || !d.publishedfileid) continue;
+      out.set(String(d.publishedfileid), {
+        result: d.result,
+        title: d.title || null,
+        previewUrl: d.preview_url || null,
+        timeUpdated: d.time_updated || null,
+        fileSize: d.file_size || null,
+        tags: Array.isArray(d.tags) ? d.tags.map((t) => t && t.tag).filter(Boolean) : [],
+        timeCreated: d.time_created || null,
+        subscriptions: Number(d.subscriptions) || 0,
+        favorited: Number(d.favorited) || 0,
+        views: Number(d.views) || 0,
+        banned: d.banned === 1 || d.banned === true,
+        banReason: d.ban_reason || null,
+        description: d.file_description || d.description || null,
+        /** 标记一下：这份是本地化过的（界面上可以据此说明） */
+        localized: true
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * 取单个 mod 的工坊详情（描述 / 标签 / 热度），带本地缓存。
  * 缓存 7 天；网络失败时退回旧缓存，实在没有就返回 null。
+ *
+ * 配了 Steam Web API Key 时优先用 GetDetails 拿**本地化（中文）**描述；没配就退回老接口。
  */
 async function getWorkshopDetails(id, cacheDir, options = {}) {
   const key = String(id || '').trim();
   if (!key) return null;
+  const apiKey = options.apiKey ? String(options.apiKey) : '';
+  const language = options.language == null ? 6 : options.language;
 
   const file = path.join(cacheDir, `${key}.json`);
   const readCache = () => {
@@ -175,15 +241,30 @@ async function getWorkshopDetails(id, cacheDir, options = {}) {
 
   const cached = readCache();
   const fresh = cached && Date.now() - (cached.fetchedAt || 0) < 7 * 24 * 60 * 60 * 1000;
-  if (fresh && !options.force) return cached;
+  // 有 key 但缓存是「没本地化过」的那份 → 重新拉，否则会一直显示英文
+  const cacheUsable = fresh && (!apiKey || cached.lang === language);
+  if (cacheUsable && !options.force) return cached;
 
   try {
-    const map = await fetchDetails([key], { withDescription: true });
-    const d = map.get(key);
+    let d = null;
+    if (apiKey) {
+      const map = await fetchLocalizedDetails([key], { key: apiKey, language });
+      d = map.get(key) || null;
+    }
+    if (!d) {
+      const map = await fetchDetails([key], { withDescription: true });
+      d = map.get(key) || null;
+    }
     if (!d) return cached; // 拿不到就退回旧缓存（可能为 null）
-    const out = { id: key, ...d, fetchedAt: Date.now() };
-    fs.mkdirSync(cacheDir, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(out), 'utf8');
+    const out = { id: key, ...d, lang: apiKey ? language : null, fetchedAt: Date.now() };
+    // 写缓存单独 try：**写不进去也不能丢掉刚取到的新数据**
+    // （之前整个 try 一起包着，缓存目录不可写时会静默退回旧缓存，问题很难查）
+    try {
+      fs.mkdirSync(cacheDir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(out), 'utf8');
+    } catch {
+      /* 忽略：本次照常返回新数据，下次再试写 */
+    }
     return out;
   } catch {
     return cached;
@@ -251,6 +332,7 @@ function createQueue(concurrency, delayMs) {
 module.exports = {
   request,
   fetchDetails,
+  fetchLocalizedDetails,
   getWorkshopDetails,
   downloadPreview,
   cachedPreview,

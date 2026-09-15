@@ -52,6 +52,40 @@ export default function BrowseDetailModal({
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState(0);
   const [broken, setBroken] = useState<Set<string>>(new Set());
+  /** 翻译：null=还没翻；''=正在翻；其它=译文 */
+  const [translated, setTranslated] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [showTranslated, setShowTranslated] = useState(true);
+
+  const desc = details?.description || '';
+  /** 描述基本是中文吗（作者提供过中文版的话，这里就是中文，不用翻） */
+  const isChinese = /[\u4e00-\u9fff]/.test(desc)
+    ? (desc.match(/[\u4e00-\u9fff]/g) || []).length / Math.max(1, desc.length) >= 0.06
+    : false;
+
+  async function doTranslate() {
+    if (translating || !desc) return;
+    setTranslating(true);
+    try {
+      const r = await api.translateText(desc);
+      if (r && r.ok && r.text) {
+        setTranslated(r.text);
+        setShowTranslated(true);
+        onToast(
+          'ok',
+          '已翻译成中文',
+          r.cached ? '用的是上次的翻译结果' : `机器翻译（MyMemory）${r.chunks ? `，${r.chunks} 段` : ''} —— 专有名词可能不准`
+        );
+      } else {
+        onToast('warn', '翻译没成功', (r && r.error) || '翻译服务没有返回内容');
+        setTranslated(r && r.text ? r.text : null);
+      }
+    } catch (e: any) {
+      onToast('err', '翻译失败', String(e?.message || e));
+    } finally {
+      setTranslating(false);
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -169,12 +203,55 @@ export default function BrowseDetailModal({
 
           <div className="section-title">创意工坊描述</div>
           {details?.description ? (
-            <WorkshopText
-              text={details.description}
-              onOpenLink={(url) => {
-                void api.openExternal(url).catch(() => onToast('err', '打不开链接', url));
-              }}
-            />
+            <>
+              <div className="browse-note" style={{ marginTop: 0 }}>
+                {details.localized ? (
+                  <span className="badge st-backup-ok" title="作者提供了中文描述，直接用他的（不是机翻）">
+                    中文（作者提供）
+                  </span>
+                ) : isChinese ? (
+                  <span className="badge st-backup-ok">描述本身是中文</span>
+                ) : (
+                  <span className="badge st-older" title="作者没提供中文描述 —— 可以用机器翻译先看个大概">
+                    只有原文
+                  </span>
+                )}
+                {!isChinese &&
+                  (translated ? (
+                    <>
+                      <button
+                        className="btn sm"
+                        style={{ marginLeft: 8 }}
+                        onClick={() => setShowTranslated((v) => !v)}
+                      >
+                        {showTranslated ? '看原文' : '看译文'}
+                      </button>
+                      <span className="bk-dim" style={{ marginLeft: 8 }}>
+                        机器翻译（MyMemory），专有名词可能不准
+                      </span>
+                    </>
+                  ) : (
+                    <button
+                      className="btn sm primary"
+                      style={{ marginLeft: 8 }}
+                      disabled={translating}
+                      onClick={() => void doTranslate()}
+                      title="用免费翻译接口（MyMemory）把整段描述翻成中文；结果会缓存，同一个 mod 只翻一次"
+                    >
+                      {translating ? '正在翻译…' : '翻译成中文'}
+                    </button>
+                  ))}
+              </div>
+              {translating && !translated && (
+                <div className="bk-dim">正在分块翻译，长描述要十几秒…</div>
+              )}
+              <WorkshopText
+                text={showTranslated && translated ? translated : details.description}
+                onOpenLink={(url) => {
+                  void api.openExternal(url).catch(() => onToast('err', '打不开链接', url));
+                }}
+              />
+            </>
           ) : (
             <div className="bk-dim">
               {loading ? '读取中…' : '这个条目没有描述，或者没能读到。'}

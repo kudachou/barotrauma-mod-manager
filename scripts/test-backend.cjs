@@ -1297,6 +1297,69 @@ try {
       badMediaId = true;
     }
     ok(badMediaId, '非法 id 被拒（这个函数会去抓页面，更不能让 id 乱跑）');
+
+    /* ---- 描述语言与翻译兜底 ---- */
+    console.log('\n[17] 描述语言判定与翻译兜底');
+
+    const tr = require('../electron/services/translate');
+
+    ok(tr.looksChinese('这是一个中文描述'), '中文描述判定为中文');
+    ok(!tr.looksChinese('[h1]Updated for the Summer Update[/h1] Consider supporting the project'), '英文描述不判成中文');
+    // 描述里混着 BBCode/链接，用"汉字占比"而不是"有没有汉字"来判断
+    const mixed =
+      '[h1]Barotraumatic[/h1]\n' +
+      'A'.repeat(400) +
+      '\n[h2]模组总结[/h2] 觉得游戏太容易和平静？无聊和重复的香草怪物没有给你的生活增加多样性或挑战？';
+    ok(tr.looksChinese(mixed), '英文为主但含大段中文的（作者自己写的双语）也判成中文，不推翻译');
+    ok(!tr.looksChinese(''), '空描述不判成中文（但界面也不会显示翻译按钮）');
+
+    // 按字节切块：MyMemory 上限是 500 **字节**，中文一个字 3 字节，不能切坏
+    const cjkText = '这是一段中文描述，用来测试按字节切块不会把多字节字符切开。'.repeat(20);
+    const chunks = tr.chunkByBytes(cjkText, 100);
+    ok(
+      chunks.every((c) => Buffer.byteLength(c, 'utf8') <= 100),
+      '每块都不超过字节上限'
+    );
+    ok(chunks.join('') === cjkText, '拼回来与原文逐字一致（没切开多字节字符）');
+    ok(tr.chunkByBytes('', 100).length === 0, '空文本不切块');
+
+    // 翻译：注入假的翻译函数，不联网
+    let trCalls = 0;
+    const trFake = await tr.translateToChinese('hello world', {
+      translateChunk: async (c) => {
+        trCalls++;
+        return `[译]${c}`;
+      }
+    });
+    ok(trFake.ok && trFake.text === '[译]hello world', '注入的翻译函数被调用并拼回结果');
+    ok(trCalls === 1, '短文本只需 1 次请求');
+
+    // 长文本 → 多块，且逐块拼接
+    let trCalls2 = 0;
+    const longText = 'word '.repeat(300); // 1500 字节 → 至少 4 块
+    const trFake2 = await tr.translateToChinese(longText, {
+      translateChunk: async (c) => {
+        trCalls2++;
+        return c.toUpperCase();
+      }
+    });
+    ok(trCalls2 >= 4, `长文本被切成多块分别翻译（实际 ${trCalls2} 块）`);
+    ok(trFake2.ok && trFake2.text === longText.toUpperCase(), '多块译文按顺序拼回');
+
+    // 某一块失败时要如实报错，并保留已经翻好的部分
+    const partial = await tr.translateToChinese(longText, {
+      translateChunk: async (c) => {
+        if (/WORD\s+word/i.test(c) || c.length > 400) throw new Error('QUERY LENGTH LIMIT EXCEEDED');
+        return 'x';
+      }
+    });
+    ok(!partial.ok && !!partial.error, '有一块失败时整体判为失败并给原因');
+    ok(/翻译失败|额度/.test(partial.error), `错误信息可读（实际「${partial.error}」）`);
+
+    const quota = await tr.translateToChinese('hi', {
+      translateChunk: async () => 'MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS'
+    });
+    ok(!quota.ok && /额度/.test(quota.error), '把「配额用完」的警告文本识别成失败，而不是当成译文');
   } catch (e) {
     console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
     failures++;

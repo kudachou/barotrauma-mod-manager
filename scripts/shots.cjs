@@ -881,6 +881,10 @@ app.whenReady().then(async () => {
             hasStats: !!m.querySelector('.ws-stats'),
             descBlocks: m.querySelectorAll('.ws-body > *').length,
             descHeadings: Array.from(m.querySelectorAll('.ws-h')).map((x) => x.textContent.trim()).slice(0, 2),
+            descBadge: (m.querySelector('.section-title + .browse-note .badge') || {}).textContent || null,
+            hasTranslateBtn: Array.from(m.querySelectorAll('.browse-note button')).some((x) =>
+              x.textContent.includes('翻译成中文')
+            ),
             tags: m.querySelectorAll('.card-tags .tag').length,
             buttons: Array.from(m.querySelectorAll('.modal-foot button')).map((x) => x.textContent.trim())
           };
@@ -888,6 +892,34 @@ app.whenReady().then(async () => {
       )
   );
   await shot(win, '25-browse-detail');
+
+  // 英文描述时应该出现「翻译成中文」按钮；点一下走预览模式的假翻译，验证切换按钮
+  const translateFlow = await win.webContents.executeJavaScript(`(() => {
+    const btn = Array.from(document.querySelectorAll('.modal .browse-note button')).find((x) =>
+      x.textContent.includes('翻译成中文')
+    );
+    if (!btn) return { clicked: false };
+    btn.click();
+    return { clicked: true };
+  })()`);
+  await sleep(1200);
+  console.log(
+    'browse-translate=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const m = document.querySelector('.modal');
+          const body = m && m.querySelector('.ws-body');
+          return {
+            clicked: ${JSON.stringify(translateFlow.clicked)},
+            hasToggle: !!Array.from(m.querySelectorAll('.browse-note button')).find((x) =>
+              x.textContent.includes('看原文')
+            ),
+            showsTranslation: !!(body && body.textContent.includes('预览模式的示例翻译'))
+          };
+        })()`)
+      )
+  );
+  await shot(win, '26-browse-translated');
   await win.webContents.executeJavaScript(`(() => {
     const b = Array.from(document.querySelectorAll('.modal-foot button')).find((x) => x.textContent.trim() === '关闭');
     if (b) b.click();
