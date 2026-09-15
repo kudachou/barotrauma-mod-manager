@@ -12,6 +12,16 @@ function xmlEscape(s) {
     .replace(/"/g, '&quot;');
 }
 
+/** 反向：把实体还原（导入别人分享的合集时要读名字） */
+function xmlUnescape(s) {
+  return String(s == null ? '' : s)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(Number(d)))
+    .replace(/&amp;/g, '&');
+}
+
 /** 只允许纯文件名，防目录穿越 */
 function resolveFile(dir, fileName) {
   const name = String(fileName == null ? '' : fileName);
@@ -21,29 +31,37 @@ function resolveFile(dir, fileName) {
   return path.join(dir, name);
 }
 
-function parseModlistFile(filePath) {
-  const raw = stripBom(fs.readFileSync(filePath, 'utf8'));
-  if (!/<mods\b/i.test(raw)) throw new Error('不是合集文件');
+/** 从文本解析合集（导入外部文件 / 粘贴的内容时用，不经过磁盘） */
+function parseModlistText(raw, fallbackName) {
+  const text = stripBom(String(raw == null ? '' : raw));
+  if (!/<mods\b/i.test(text)) throw new Error('不是合集文件');
 
-  const nameM = raw.match(/<mods\b[^>]*\bname\s*=\s*"([^"]*)"/i);
-  const name = nameM ? nameM[1] : path.basename(filePath, path.extname(filePath));
+  const nameM = text.match(/<mods\b[^>]*\bname\s*=\s*"([^"]*)"/i);
+  const name = nameM ? xmlUnescape(nameM[1]) : fallbackName || '未命名';
 
   const entries = [];
   const re = /<(Vanilla|Workshop|Local)\b([^>]*?)(\/?)>/gi;
   let m;
-  while ((m = re.exec(raw))) {
+  while ((m = re.exec(text))) {
     const kind = m[1].toLowerCase();
     if (kind === 'vanilla') continue; // Vanilla 固定置顶，不进入可编辑列表
     const attrs = m[2] || '';
     const g = (n) => {
       const r = attrs.match(new RegExp('(?:^|[\\s])' + n + '\\s*=\\s*"([^"]*)"', 'i'));
-      return r ? r[1] : null;
+      return r ? xmlUnescape(r[1]) : null;
     };
     if (kind === 'workshop') entries.push({ type: 'workshop', name: g('name'), id: g('id') });
     else entries.push({ type: 'local', name: g('name') });
   }
+  return { name, entries };
+}
 
-  return { fileName: path.basename(filePath), name, entries };
+function parseModlistFile(filePath) {
+  const ml = parseModlistText(
+    fs.readFileSync(filePath, 'utf8'),
+    path.basename(filePath, path.extname(filePath))
+  );
+  return { fileName: path.basename(filePath), name: ml.name, entries: ml.entries };
 }
 
 function serializeModlist(name, entries) {
@@ -137,6 +155,8 @@ module.exports = {
   addModToModlist,
   removeModFromModlist,
   parseModlistFile,
+  parseModlistText,
   serializeModlist,
-  xmlEscape
+  xmlEscape,
+  xmlUnescape
 };

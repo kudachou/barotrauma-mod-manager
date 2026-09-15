@@ -132,6 +132,12 @@ function mockUpdateState(): UpdateState {
   };
 }
 
+/** 预览模式用：合集名 → 文件名（跟 ui.ts 的 safeFileName 一个规则） */
+function safeFileNameForMock(name: string): string {
+  const cleaned = String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+  return `${cleaned || '未命名'}.xml`;
+}
+
 /** 预览模式用：把版本号最后一段 +1，好演示「游戏里 v1.0 → Steam v1.1」 */
 function bumpVersion(v: string | null | undefined): string {
   const s = String(v || '1.0');
@@ -258,6 +264,76 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   deleteModlist: async (fileName: string): Promise<void> => {
     state.modlists = state.modlists.filter((l) => l.fileName !== fileName);
     refreshUsedIn();
+  },
+
+  /* ------------- 合集导入 / 导出（预览模式下只做界面演示） ------------- */
+
+  exportModlistFile: async (
+    _name: string,
+    _entries: ModlistEntry[],
+    format: string,
+    _note?: string
+  ): Promise<{ ok: boolean; canceled?: boolean; path?: string }> => ({
+    ok: false,
+    canceled: true,
+    path: `（预览模式不会真的保存文件：${format}）`
+  }),
+
+  exportModlistText: async (name: string, entries: ModlistEntry[], _note?: string): Promise<string> => {
+    const ws = entries.filter((e) => e.type === 'workshop');
+    const local = entries.filter((e) => e.type === 'local');
+    const lines = [`【潜渊症合集】${name}`, `共 ${entries.length} 个 mod（工坊 ${ws.length} · 本地 ${local.length}）`, ''];
+    for (const e of ws) {
+      lines.push(
+        `${e.id}  ${e.name || ''}  https://steamcommunity.com/sharedfiles/filedetails/?id=${e.id}`
+      );
+    }
+    for (const e of local) lines.push(String(e.name || ''));
+    return lines.join('\n');
+  },
+
+  previewImportModlist: async (payload: {
+    path?: string;
+    text?: string;
+  }): Promise<{
+    format: string;
+    name: string;
+    entries: ModlistEntry[];
+    count: number;
+    missingCount: number;
+    missing: ModlistEntry[];
+  }> => {
+    const raw = String(payload?.text || '');
+    const ids = [...raw.matchAll(/\b(\d{5,20})\b/g)].map((m) => m[1]);
+    const entries: ModlistEntry[] = (ids.length ? ids : ['2559634234', '3343911734']).map((id) => ({
+      type: 'workshop',
+      id,
+      name: state.mods.find((m) => m.id === id)?.name || null
+    }));
+    const missing = entries.filter((e) => !state.mods.some((m) => m.id === e.id));
+    return {
+      format: ids.length ? 'text' : '（预览示例）',
+      name: '导入的合集',
+      entries,
+      count: entries.length,
+      missingCount: missing.length,
+      missing
+    };
+  },
+
+  importModlist: async (payload: {
+    entries: ModlistEntry[];
+    name: string;
+    apply?: boolean;
+  }): Promise<{ ok: boolean; fileName: string; name: string; count: number }> => {
+    const fileName = `${safeFileNameForMock(payload.name)}`;
+    state.modlists.push({
+      fileName,
+      name: payload.name,
+      entries: payload.entries.map((e) => ({ ...e }))
+    });
+    refreshUsedIn();
+    return { ok: true, fileName, name: payload.name, count: payload.entries.length };
   },
   applyModlist: async (
     name: string,

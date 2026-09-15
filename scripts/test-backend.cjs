@@ -1360,6 +1360,107 @@ try {
       translateChunk: async () => 'MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS'
     });
     ok(!quota.ok && /额度/.test(quota.error), '把「配额用完」的警告文本识别成失败，而不是当成译文');
+
+    /* ---- 合集的导出 / 导入 ---- */
+    console.log('\n[18] 合集导出与导入');
+
+    const share = require('../electron/services/share');
+    const demoEntries = [
+      { type: 'workshop', id: '3343911734', name: 'Smarter Bot AI' },
+      { type: 'workshop', id: '2559634234', name: 'LuaCsForBarotrauma' },
+      { type: 'local', name: '我的自改版' }
+    ];
+
+    // 导出的 XML 就是游戏原生格式（复用 serializeModlist），解析回来要一致
+    const xml = share.buildXml('联机用 & 测试', demoEntries);
+    ok(/<mods name="联机用 &amp; 测试">/.test(xml), '导出 XML 时名字里的 & 被转义');
+    const backXml = share.parseShared(xml, 'x');
+    ok(backXml.format === 'xml', '认得出这是 XML 合集');
+    ok(backXml.name === '联机用 & 测试', '名字里的实体还原正确（不是 &amp;）');
+    ok(backXml.entries.length === 3, '条目数一致');
+    ok(
+      backXml.entries[0].id === '3343911734' && backXml.entries[0].name === 'Smarter Bot AI',
+      '工坊条目的 id 与名字都对'
+    );
+    ok(
+      backXml.entries[2].type === 'local' && backXml.entries[2].name === '我的自改版',
+      '本地条目也对'
+    );
+
+    // 导出的 JSON 能原样导入
+    const json = share.buildJson('联机用', demoEntries, { note: '给老王' });
+    const backJson = share.parseShared(json, 'x');
+    ok(backJson.format === 'json' && backJson.note === '给老王', 'JSON 能解析并带回附言');
+    ok(backJson.entries.length === 3 && backJson.entries[1].id === '2559634234', 'JSON 条目正确');
+    ok(/^\s*[{[]/.test(json), 'JSON 导出的确是 JSON');
+
+    // 导出的文本：贴聊天用，工坊条目要带链接
+    const txt = share.buildText('联机用', demoEntries, { note: '装这个合集' });
+    ok(txt.includes('装这个合集'), '文本里带附言');
+    ok(
+      txt.includes('https://steamcommunity.com/sharedfiles/filedetails/?id=3343911734'),
+      '每个工坊 mod 都带工坊链接（朋友点开就能订阅）'
+    );
+    ok(txt.includes('我的自改版') && /本地 mod/.test(txt), '本地 mod 单独列出来');
+
+    // 从纯文本导入：三种常见写法都要认出来
+    const pasted = [
+      '【潜渊症合集】联机用',
+      '3343911734  Smarter Bot AI  https://steamcommunity.com/sharedfiles/filedetails/?id=3343911734',
+      'id=2559634234 LuaCsForBarotrauma',
+      '2683570256',
+      '3343911734 重复的应该被去掉',
+      '这不是一行 mod 说明文字'
+    ].join('\n');
+    const backText = share.parseShared(pasted, '朋友发来的');
+    const ids = backText.entries.map((e) => e.id);
+    ok(ids.join(',') === '3343911734,2559634234,2683570256', `三种写法都认、去重（实际 ${ids.join(',')}）`);
+    ok(backText.entries[0].name === 'Smarter Bot AI', '把 id 后面的名字也捞出来了');
+    ok(backText.entries[1].name === 'LuaCsForBarotrauma', 'id=xxx 后面带名字的也认');
+    ok(!backText.entries.some((e) => /说明文字/.test(String(e.name))), '没 id 的行被忽略');
+    ok(backText.name === '朋友发来的', '纯文本导入时用传入的兜底名字');
+
+    // 一个 id 都没有 / 空内容：要明确报错而不是悄悄导入个空合集
+    let emptyThrew = false;
+    try {
+      share.parseShared('你好呀，今天天气不错', 'x');
+    } catch {
+      emptyThrew = true;
+    }
+    ok(emptyThrew, '认不出任何 id 时报错，而不是导入空合集');
+    let blankThrew = false;
+    try {
+      share.parseShared('   ', 'x');
+    } catch {
+      blankThrew = true;
+    }
+    ok(blankThrew, '空内容报错');
+    let badJsonThrew = false;
+    try {
+      share.parseShared('{"hello":1}', 'x');
+    } catch {
+      badJsonThrew = true;
+    }
+    ok(badJsonThrew, '不是本管理器导出的 JSON 要拒绝（免得导入乱七八糟的东西）');
+
+    // 认不出名字的条目补标题（注入假的接口，不联网）
+    const noName = [{ type: 'workshop', id: '111', name: null }];
+    await share.fillNames(noName, {
+      fetchDetails: async () => new Map([['111', { title: '接口给的标题' }]])
+    });
+    ok(noName[0].name === '接口给的标题', '按 id 从工坊接口补上标题');
+
+    // 默认文件名与重名处理
+    ok(share.suggestFileName('联机/测试:*?', 'xml') === '联机_测试___.xml', `非法字符被替换（实际 ${share.suggestFileName('联机/测试:*?', 'xml')}）`);
+    const dir16 = path.join(TMP, 'share-name');
+    fs.mkdirSync(dir16, { recursive: true });
+    fs.writeFileSync(path.join(dir16, '联机.xml'), 'x', 'utf8');
+    fs.writeFileSync(path.join(dir16, '联机 (2).xml'), 'x', 'utf8');
+    ok(
+      share.uniqueFileName(dir16, '联机.xml') === '联机 (3).xml',
+      `重名时往后找空位，不覆盖已有合集（实际 ${share.uniqueFileName(dir16, '联机.xml')}）`
+    );
+    ok(share.uniqueFileName(dir16, '新的.xml') === '新的.xml', '不重名时保持原名');
   } catch (e) {
     console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
     failures++;

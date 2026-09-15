@@ -25,6 +25,15 @@
   - 应用后**立刻重新扫描**，界面上「游戏当前应用」和「当前应用」徽章马上就是新的（不用点第二次）
 - **「游戏当前应用」**：合集列表顶部直接列出游戏现在真正加载的 mod（读自 `config_player.xml`，
   按加载顺序），只读；内容与之一致的合集会打上「当前应用」徽章
+- **未订阅清单**：合集里有本机还没有的 mod 时，编辑器顶上出现「只看未订阅 N」筛选，
+  每一行都能点「**去订阅**」直接打开那个 mod 的工坊页面；订阅并下载完，回顶栏点「同步到游戏」装进游戏
+- **导入 / 导出合集**（联机时把整套配置发给朋友）：
+  - 导出 **`.xml`** —— 游戏原生格式，**对方不用装本管理器**，丢进 `ModLists` 文件夹就能在游戏里选
+  - 导出 **`.json`** —— 用本管理器的朋友导入时信息最全（未订阅的 mod 也带名字和链接）
+  - **复制成文本** —— 贴聊天里，每个工坊 mod 一行带链接，点开就能订阅
+  - 导入认这三种（选文件或**直接粘贴**）：哪怕朋友只发来一串工坊 id 也能认出来，
+    还会自动补上 mod 名字、列出**本机还没有的**（每行一个「去订阅」按钮）；
+    重名合集自动加序号，**不覆盖已有合集**
 
 **Mod 详情**
 - **创意工坊描述**：直接显示 mod 作者写的描述（保留标题层级、列表、粗体斜体、链接、分隔线），
@@ -440,6 +449,7 @@ electron/            主进程
     openinsteam.js    在 Steam 客户端里打开工坊页面（直接调 steam.exe）
     workshoppage.js   从工坊页面 HTML 里抽封面与截图（详情弹窗用）
     translate.js      描述没有中文版时用免费接口翻译成中文
+    share.js          合集的导入 / 导出（xml / json / 文本三种形态）
     steam.js         工坊封面（公开接口 + 缓存）
     categories.js    分类规则与标签持久化
     relations.js     mod 之间的关联（前置需求）
@@ -466,6 +476,7 @@ pnpm exec electron scripts/test-apply-ui.cjs     # 「应用到游戏」点一�
 pnpm exec electron scripts/test-saves-ui.cjs     # 存档页：解析、对应合集、两个动作（隔离临时存档）
 pnpm exec electron scripts/test-sync-ui.cjs      # 工坊更新同步进游戏（隔离临时目录）
 pnpm exec electron scripts/test-browse-ui.cjs    # 浏览工坊：没 key / key 失效时的提示（隔离 userData）
+pnpm exec electron scripts/test-share-ui.cjs     # 合集导入导出 + 未订阅清单（隔离临时目录）
 ```
 
 `test-apply-ui.cjs` 是为了用户反馈的那个坑留下的：**点一次「应用到游戏」，config 确实写进去了，

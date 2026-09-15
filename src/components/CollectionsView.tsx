@@ -5,6 +5,8 @@ import { compareBadge, initials, safeFileName, uniq } from '../ui';
 import {
   IconAlert,
   IconCheck,
+  IconDownload,
+  IconExternal,
   IconGrip,
   IconLayers,
   IconPlus,
@@ -14,6 +16,7 @@ import {
   IconSearch,
   IconTrash
 } from './Icons';
+import ShareModal from './ShareModal';
 
 /** 合集列表里的一个虚拟条目：游戏当前生效的内容 */
 const APPLIED = '__applied__';
@@ -41,6 +44,29 @@ export default function CollectionsView({
   const [pickerQ, setPickerQ] = useState('');
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
+  /** 只看未订阅（本机没有的） */
+  const [onlyMissing, setOnlyMissing] = useState(false);
+  /** 合集分享弹窗：null = 关闭 */
+  const [shareMode, setShareMode] = useState<'export' | 'import' | null>(null);
+
+  /** 打开某个工坊条目的页面去订阅（优先 Steam 客户端，失败退回网页版） */
+  async function openWorkshopPage(id: string) {
+    try {
+      const r = await api.openWorkshopInSteam(id);
+      if (r && r.ok) {
+        onToast('info', '已在 Steam 里打开', '订阅并下载完成后，回到这里点顶栏「同步到游戏」');
+        return;
+      }
+      throw new Error((r && r.error) || '打不开 Steam');
+    } catch {
+      try {
+        await api.getWorkshopPage(id);
+        onToast('info', '已用浏览器打开工坊页面', '订阅后回到这里点顶栏「同步到游戏」');
+      } catch (e2: any) {
+        onToast('err', '打不开工坊页面', String(e2?.message || e2));
+      }
+    }
+  }
 
   // 自动选中第一个合集
   useEffect(() => {
@@ -259,6 +285,13 @@ export default function CollectionsView({
           <button className="btn icon sm" title="新建合集" onClick={() => setCreating(true)}>
             <IconPlus size={14} />
           </button>
+          <button
+            className="btn icon sm"
+            title="从文件或朋友发来的文字导入合集"
+            onClick={() => setShareMode('import')}
+          >
+            <IconDownload size={14} />
+          </button>
         </div>
 
         {creating && (
@@ -455,6 +488,14 @@ export default function CollectionsView({
             )}
             <span className="spacer" />
             <button
+              className="btn sm"
+              onClick={() => setShareMode('export')}
+              title="导出这个合集（.xml 连没装本管理器的人也能用）"
+            >
+              <IconExternal size={14} />
+              导出
+            </button>
+            <button
               className="btn sm danger"
               onClick={() => deleteList(current.fileName, current.name)}
               title="删除该合集"
@@ -485,6 +526,16 @@ export default function CollectionsView({
               >
                 <IconGrip size={12} />
                 拖拽调整顺序（顺序即加载顺序，越靠下越后加载）
+                <span className="spacer" />
+                {missingCount > 0 && (
+                  <div
+                    className={`tag-toggle ${onlyMissing ? 'on' : ''}`}
+                    onClick={() => setOnlyMissing((v) => !v)}
+                    title="只看本机还没有的 mod —— 每个都能点『去订阅』打开工坊页面"
+                  >
+                    只看未订阅 {missingCount}
+                  </div>
+                )}
               </div>
               {entries.length === 0 && (
                 <div className="empty" style={{ padding: 30 }}>
@@ -493,7 +544,16 @@ export default function CollectionsView({
                   <div>从右侧列表点击添加 mod</div>
                 </div>
               )}
-              {entries.map((e, i) => {
+              {missingCount > 0 && (
+                <div className="hint" style={{ marginBottom: 8 }}>
+                  {missingCount} 个 mod 本机还没有（没订阅 / 没下载 / 本地文件夹不在）。
+                  点每行的「<b>去订阅</b>」打开工坊页面订阅，下好后回到顶栏点「同步到游戏」装进游戏。
+                </div>
+              )}
+              {entries
+                .map((e, i) => ({ e, i }))
+                .filter(({ e }) => !onlyMissing || !resolve(e))
+                .map(({ e, i }) => {
                 const m = resolve(e);
                 const hue = placeholderHue(e.name || e.id || '?');
                 const src = imgSrc(m?.preview || null);
@@ -546,6 +606,15 @@ export default function CollectionsView({
                         {!m && <span className="badge st-different">未找到</span>}
                       </div>
                     </div>
+                    {!m && e.type === 'workshop' && e.id && (
+                      <button
+                        className="btn sm"
+                        title="在 Steam 里打开这个 mod 的工坊页面去订阅"
+                        onClick={() => openWorkshopPage(e.id as string)}
+                      >
+                        去订阅
+                      </button>
+                    )}
                     <button
                       className="btn icon sm"
                       title="移除"
@@ -601,9 +670,24 @@ export default function CollectionsView({
           <div className="empty">
             <IconLayers size={36} />
             <div className="empty-title">选择左侧的一个合集</div>
-            <div>或点击 + 新建一个合集</div>
+            <div>或点击 + 新建一个合集 / 点 ⤓ 导入朋友发来的合集</div>
           </div>
         </div>
+      )}
+
+      {shareMode && (
+        <ShareModal
+          mode={shareMode}
+          listName={current?.name}
+          entries={current?.entries}
+          onClose={() => setShareMode(null)}
+          onDone={async (openFileName) => {
+            await onRefresh();
+            if (openFileName) setSelectedFile(openFileName);
+          }}
+          onToast={onToast}
+          openWorkshop={(id) => void openWorkshopPage(id)}
+        />
       )}
     </div>
   );

@@ -927,6 +927,87 @@ app.whenReady().then(async () => {
   })()`);
   await sleep(400);
 
+  /* --------------------------- 合集分享（导入/导出） --------------------------- */
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('合集')).click()`
+  );
+  await sleep(900);
+  const openedShare = await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.editor-head button')).find((x) =>
+      x.textContent.includes('导出')
+    );
+    if (!b) return false;
+    b.click();
+    return true;
+  })()`);
+  await sleep(800);
+  console.log(
+    'share-export=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const m = document.querySelector('.modal');
+          if (!m) return { opened: false };
+          return {
+            opened: ${JSON.stringify(openedShare)},
+            title: (m.querySelector('.modal-title') || {}).textContent || null,
+            tabs: Array.from(m.querySelectorAll('.tag-toggle')).map((x) => x.textContent.trim()),
+            buttons: Array.from(m.querySelectorAll('.btn-row button')).map((x) => x.textContent.trim()),
+            mentionsBareXml: m.textContent.includes('不用装本管理器'),
+            hasNote: !!m.querySelector('.search input')
+          };
+        })()`)
+      )
+  );
+  await shot(win, '27-share-export');
+
+  // 切到导入页签，粘一段文字解析，看预览
+  await win.webContents.executeJavaScript(`(() => {
+    const t = Array.from(document.querySelectorAll('.modal .tag-toggle')).find((x) =>
+      x.textContent.includes('导入合集')
+    );
+    if (t) t.click();
+    return !!t;
+  })()`);
+  await sleep(400);
+  await win.webContents.executeJavaScript(`(() => {
+    const ta = document.querySelector('.modal .share-paste');
+    if (!ta) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(ta, '3343911734 Smarter Bot AI\\nid=2559634234 LuaCsForBarotrauma\\n2683570256');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  await sleep(300);
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal .btn-row button')).find((x) =>
+      x.textContent.includes('解析这段文字')
+    );
+    if (b) b.click();
+    return !!b;
+  })()`);
+  await sleep(900);
+  console.log(
+    'share-import=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const m = document.querySelector('.modal');
+          return {
+            stats: Array.from(m.querySelectorAll('.bk-stat')).map((x) => x.textContent.replace(/\\s+/g, ' ').trim()),
+            missingRows: m.querySelectorAll('.bk-list .bk-row').length,
+            hasApplyCheck: !!m.querySelector('.share-check input'),
+            footButtons: Array.from(m.querySelectorAll('.modal-foot button')).map((x) => x.textContent.trim())
+          };
+        })()`)
+      )
+  );
+  await shot(win, '28-share-import');
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot button')).find((x) => x.textContent.trim() === '关闭');
+    if (b) b.click();
+    return !!b;
+  })()`);
+  await sleep(400);
+
   console.log('ERRORS ' + JSON.stringify(errors, null, 1));
   app.exit(0);
 });

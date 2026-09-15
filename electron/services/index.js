@@ -27,6 +27,15 @@ const { browse: browseWorkshop, browseTags: browseWorkshopTags } = require('./wo
 const { openWorkshopInSteam } = require('./openinsteam');
 const { getMedia: getWorkshopMedia } = require('./workshoppage');
 const { translateToChinese } = require('./translate');
+const {
+  buildText: buildShareText,
+  buildJson: buildShareJson,
+  buildXml: buildShareXml,
+  parseShared,
+  fillNames,
+  suggestFileName,
+  uniqueFileName
+} = require('./share');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -349,6 +358,100 @@ function registerIpc() {
     const s = getSettings();
     removeModFromModlist(s.modListsDir, fileName, entry);
     return true;
+  });
+
+  /* ------------------------- 合集导入 / 导出 ------------------------- */
+
+  /** 导出：弹出保存对话框并写文件；format = 'xml' | 'json' | 'text' */
+  ipcMain.handle('modlist:exportFile', async (_e, name, entries, format, note) => {
+    const fmt = format === 'json' ? 'json' : format === 'text' ? 'txt' : 'xml';
+    const content =
+      format === 'json'
+        ? buildShareJson(name, entries, { note })
+        : format === 'text'
+          ? buildShareText(name, entries, { note })
+          : buildShareXml(name, entries);
+    const r = await dialog.showSaveDialog({
+      title: '导出合集',
+      defaultPath: suggestFileName(name, fmt),
+      filters: [
+        { name: fmt === 'xml' ? '游戏合集文件' : fmt === 'json' ? 'JSON' : '文本', extensions: [fmt] },
+        { name: '全部文件', extensions: ['*'] }
+      ]
+    });
+    if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(r.filePath, content, 'utf8');
+    return { ok: true, path: r.filePath, bytes: Buffer.byteLength(content, 'utf8') };
+  });
+
+  /** 导出成文本（界面拿去复制到剪贴板，贴聊天里用） */
+  ipcMain.handle('modlist:exportText', (_e, name, entries, note) =>
+    buildShareText(name, entries, { note })
+  );
+
+  /** 导入预览：解析文件或粘贴的文本，先给用户看清楚再决定 */
+  ipcMain.handle('modlist:previewImport', async (_e, payload) => {
+    const p = payload || {};
+    let raw = p.text;
+    let fallback = null;
+    if (p.path) {
+      const file = String(p.path);
+      if (!fs.existsSync(file)) throw new Error(`文件不存在：${file}`);
+      raw = fs.readFileSync(file, 'utf8');
+      fallback = path.basename(file, path.extname(file));
+    }
+    const parsed = parseShared(raw, fallback);
+    // 认不出名字的工坊条目补一下标题（界面要显示给用户看）
+    await fillNames(parsed.entries);
+
+    // 顺便告诉界面：哪些是本机还没有的（未订阅 / 未下载 / 本地 mod 缺失）
+    const s = getSettings();
+    const known = new Set();
+    for (const m of scanDir('workshop', s.workshopModsDir)) known.add(`workshop:${m.id}`);
+    for (const m of scanDir('workshop', s.installedWorkshopDir)) known.add(`workshop:${m.id}`);
+    for (const m of scanDir('local', s.localModsDir)) known.add(`local:${m.id}`);
+    const missing = parsed.entries
+      .map((e) => (e.type === 'workshop' ? `workshop:${e.id}` : `local:${e.name}`))
+      .filter((k) => !known.has(k));
+
+    return {
+      format: parsed.format,
+      name: parsed.name,
+      note: parsed.note,
+      entries: parsed.entries,
+      count: parsed.entries.length,
+      missingCount: missing.length,
+      /** 本机没有的条目（界面用来列"未订阅"清单） */
+      missing: parsed.entries.filter((e, i) => {
+        const k = e.type === 'workshop' ? `workshop:${e.id}` : `local:${e.name}`;
+        return missing.includes(k);
+      })
+    };
+  });
+
+  /** 真正导入：写进 ModLists（重名自动加序号），可选立刻应用到游戏 */
+  ipcMain.handle('modlist:import', async (_e, payload) => {
+    const p = payload || {};
+    const parsed =
+      p.entries && Array.isArray(p.entries)
+        ? { name: p.name || '导入的合集', entries: p.entries, format: 'direct' }
+        : parseShared(p.text || (p.path ? fs.readFileSync(String(p.path), 'utf8') : ''), p.name);
+    const s = getSettings();
+    const wanted = suggestFileName(p.name || parsed.name, 'xml');
+    const fileName = uniqueFileName(s.modListsDir, wanted);
+    saveModlist(s.modListsDir, fileName, (p.name || parsed.name || '导入的合集').trim(), parsed.entries);
+
+    let applied = null;
+    if (p.apply) {
+      applied = applyToGame(s, parsed.entries);
+    }
+    return {
+      ok: true,
+      fileName,
+      name: (p.name || parsed.name || '导入的合集').trim(),
+      count: parsed.entries.length,
+      applied
+    };
   });
 
   ipcMain.handle('modlist:apply', (_e, name, entries) => {

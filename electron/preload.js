@@ -20,6 +20,13 @@ contextBridge.exposeInMainWorld('api', {
   deleteModlist: (fileName) => invoke('modlist:delete', fileName),
   addModToModlist: (fileName, name, entry) => invoke('modlist:addMod', fileName, name, entry),
   removeModFromModlist: (fileName, entry) => invoke('modlist:removeMod', fileName, entry),
+
+  // 合集导入 / 导出（联机时发给朋友）
+  exportModlistFile: (name, entries, format, note) =>
+    invoke('modlist:exportFile', name, entries, format, note),
+  exportModlistText: (name, entries, note) => invoke('modlist:exportText', name, entries, note),
+  previewImportModlist: (payload) => invoke('modlist:previewImport', payload),
+  importModlist: (payload) => invoke('modlist:import', payload),
   applyModlist: (name, entries) => invoke('modlist:apply', name, entries),
 
   // 存档：读出每个存档当时启用了哪些 mod
