@@ -111,14 +111,30 @@ export default function BrowseView({
     void load({ page: p });
   }
 
-  async function openItem(it: BrowseItem) {
+  async function openInSteam(it: BrowseItem) {
     try {
-      await api.openExternal(it.pageUrl);
+      const r = await api.openWorkshopInSteam(it.id);
+      if (!r || !r.ok) throw new Error((r && r.error) || '打不开 Steam');
       onToast(
         'info',
-        '已在浏览器/Steam 里打开工坊页面',
-        '在那个页面上点「订阅」，Steam 下载完成后回到本管理器点顶栏「同步到游戏」即可装进游戏'
+        '已在 Steam 客户端里打开',
+        '在 Steam 里点「订阅」，下载完成后回到本管理器点顶栏「同步到游戏」即可装进游戏'
       );
+    } catch (e: any) {
+      // Steam 那条路走不通就退回网页版，别让按钮变成死的
+      try {
+        await api.openExternal(it.pageUrl);
+        onToast('warn', '没能打开 Steam 客户端，已改用网页版', String(e?.message || e));
+      } catch (e2: any) {
+        onToast('err', '打不开工坊页面', String(e2?.message || e2));
+      }
+    }
+  }
+
+  async function openWeb(it: BrowseItem) {
+    try {
+      await api.openExternal(it.pageUrl);
+      onToast('info', '已用浏览器打开工坊页面', '在那个页面上点「订阅」也一样有效');
     } catch (e: any) {
       onToast('err', '打不开工坊页面', String(e?.message || e));
     }
@@ -295,9 +311,20 @@ export default function BrowseView({
                       ))}
                     </div>
                     <div className="browse-actions">
-                      <button className="btn sm primary" onClick={() => void openItem(it)}>
+                      <button
+                        className="btn sm primary"
+                        onClick={() => void openInSteam(it)}
+                        title="在 Steam 客户端里打开这个条目 —— 直接在客户端里点「订阅」"
+                      >
                         <IconExternal size={13} />
-                        打开工坊页面
+                        在 Steam 里打开
+                      </button>
+                      <button
+                        className="btn sm"
+                        onClick={() => void openWeb(it)}
+                        title="用浏览器打开网页版的工坊页面"
+                      >
+                        网页版
                       </button>
                     </div>
                   </div>
@@ -325,7 +352,8 @@ export default function BrowseView({
           )}
 
           <div className="browse-note">
-            订阅走 Steam 自己：点「打开工坊页面」→ 在页面/Steam 里点「订阅」→ 下载完成后回到本管理器，
+            订阅走 Steam 自己：点「<b>在 Steam 里打开</b>」→ 在 Steam 客户端里点「订阅」
+            （按钮换成「网页版」就用浏览器打开，效果一样）→ 下载完成后回到本管理器，
             点顶栏的「同步到游戏」把新装的 mod 同步进游戏（本页刻意不做下载，免得引入 SteamCMD 依赖）。
             <br />
             本页的数据都来自 Steam 官方接口，所以<b>必须能访问 Steam</b>

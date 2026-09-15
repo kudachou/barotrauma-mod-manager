@@ -719,7 +719,12 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   openPath: async (_p?: string): Promise<void> => {},
   openModFolder: async (_p?: string): Promise<void> => {},
   openExternal: async (_url?: string): Promise<void> => {},
-  getWorkshopPage: async (_id?: string): Promise<void> => {}
+  getWorkshopPage: async (_id?: string): Promise<void> => {},
+  openWorkshopInSteam: async (id?: string): Promise<{ ok: boolean; via: string; url: string }> => ({
+    ok: true,
+    via: 'preview',
+    url: `steam://url/CommunityFilePage/${id || ''}`
+  })
 };
 
 export const api: typeof mockApi = real || mockApi;

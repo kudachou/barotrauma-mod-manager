@@ -1169,6 +1169,53 @@ try {
     ok(/API Key/.test(err.error || ''), '403 时提示是 Key 的问题');
     const err2 = await wb.browse({}, { key: 'K', getJson: async () => { throw new Error('ECONNRESET'); } });
     ok(/连不上 Steam/.test(err2.error || ''), '网络错误时给出人话');
+    const err3 = await wb.browse({}, { key: 'K', getJson: async () => { throw new Error('请求超时'); } });
+    ok(/加速器/.test(err3.error || ''), '超时提示里点名加速器/代理（国内不开就连不上）');
+
+    /* ---- 「在 Steam 客户端里打开工坊页面」的 URL 组装与兜底 ---- */
+    console.log('\n[15] 在 Steam 客户端里打开工坊页面');
+
+    const ois = require('../electron/services/openinsteam');
+
+    ok(
+      ois.steamWorkshopUrl('2559634234') === 'steam://url/CommunityFilePage/2559634234',
+      '生成 steam://url/CommunityFilePage/<id>（实测这个命令能让客户端加载页面）'
+    );
+    let badId = false;
+    try {
+      ois.steamWorkshopUrl('2559634234/../../evil');
+    } catch {
+      badId = true;
+    }
+    ok(badId, '非纯数字的 id 被拒（不让外部字符串拼出任意 steam:// 命令）');
+    let badId2 = false;
+    try {
+      ois.steamWorkshopUrl('');
+    } catch {
+      badId2 = true;
+    }
+    ok(badId2, '空 id 被拒');
+
+    // steam.exe 的位置：游戏目录优先反推
+    const cand = ois.steamExeCandidates({ gameDir: 'D:\\Steam\\steamapps\\common\\Barotrauma' });
+    ok(
+      cand[0] === path.join('D:\\Steam', 'steam.exe'),
+      `优先用游戏目录反推 steam.exe（实际 ${cand[0]}）`
+    );
+
+    // 找不到 steam.exe → 退回 shell；两条都没有 → 如实失败
+    let shellUrl = '';
+    const viaShell = ois.openWorkshopInSteam({}, '12345', {
+      findExe: () => null,
+      openExternal: (u) => {
+        shellUrl = u;
+      }
+    });
+    ok(viaShell.ok && viaShell.via === 'shell', '找不到 steam.exe 时退回交给系统处理');
+    ok(shellUrl === 'steam://url/CommunityFilePage/12345', '退回时用的还是同一个 steam:// 地址');
+
+    const nowhere = ois.openWorkshopInSteam({}, '12345', { findExe: () => null });
+    ok(!nowhere.ok && !!nowhere.error, '两条路都走不通时如实返回失败（由界面再用网页版兜底）');
   } catch (e) {
     console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
     failures++;

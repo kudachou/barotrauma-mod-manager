@@ -843,6 +843,15 @@ app.whenReady().then(async () => {
             total: (document.querySelector('.browse-total') || {}).textContent || null,
             sorts: Array.from(document.querySelectorAll('.browse-sorts .tag-toggle')).map((x) => x.textContent.trim()),
             buttons: Array.from(document.querySelectorAll('.browse-actions button')).slice(0, 2).map((x) => x.textContent.trim()),
+            primaryIsSteam: (() => {
+              const b = Array.from(document.querySelectorAll('.browse-actions button')).find((x) =>
+                x.textContent.includes('在 Steam 里打开')
+              );
+              return !!b && b.classList.contains('primary');
+            })(),
+            hasWebFallback: Array.from(document.querySelectorAll('.browse-actions button')).some((x) =>
+              x.textContent.trim() === '网页版'
+            ),
             pager: (document.querySelector('.browse-pager') || {}).textContent || null,
             owned: document.querySelectorAll('.browse .badge.st-backup-ok').length
           };

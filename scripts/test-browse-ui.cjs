@@ -167,6 +167,14 @@ app.whenReady().then(async () => {
     String(txt).slice(0, 200)
   );
 
+  // 非法 id 走真实 IPC：应该被拒（证明这条链路真的接上了，且不会乱开东西）
+  // 卡片上的按钮（「在 Steam 里打开」/「网页版」）在有数据的预览模式里断言 —— 见 shots.cjs，
+  // 这里走的是"key 无效"路径，页面上没有卡片。
+  const badId = await win.webContents.executeJavaScript(
+    `window.api.openWorkshopInSteam('abc/../evil').then(() => 'NO-ERROR').catch((e) => String(e.message || e))`
+  );
+  ok(/非法的工坊 id/.test(badId), '非法 id 被主进程拒绝（不让外部字符串拼 steam:// 命令）');
+
   ok(errors.length === 0, '渲染进程没有报错', errors.join(' | '));
 
   console.log(`\n=== ${fail === 0 ? '全部通过' : fail + ' 项失败'}（${pass} 通过 / ${fail} 失败）===`);

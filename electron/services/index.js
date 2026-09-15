@@ -24,6 +24,7 @@ const { applyToGame, readAppliedPackages } = require('./config');
 const { listSaves } = require('./saves');
 const { installStatus, pendingSyncOf, planInstallSync, runInstallSync } = require('./installsync');
 const { browse: browseWorkshop } = require('./workshopbrowse');
+const { openWorkshopInSteam } = require('./openinsteam');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -719,6 +720,15 @@ function registerIpc() {
     await shell.openExternal(u);
     return true;
   });
+
+  /** 在 Steam 客户端里打开工坊页面（网页版由界面自己用 openExternal 保底） */
+  ipcMain.handle('shell:openWorkshopInSteam', (_e, id) =>
+    openWorkshopInSteam(getSettings(), id, {
+      openExternal: (u) => {
+        shell.openExternal(u).catch(() => {});
+      }
+    })
+  );
 
   /* ---------------------------- 浏览创意工坊 ---------------------------- */
 
