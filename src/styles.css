@@ -555,7 +555,63 @@ select.input option {
   gap: 16px;
 }
 
+/* ---------------------- 浏览工坊：详情弹窗的图片 ---------------------- */
+
+.ws-main {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.ws-main img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.ws-shots {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.ws-shot {
+  flex: none;
+  width: 108px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.14s, border-color 0.14s;
+}
+
+.ws-shot:hover {
+  opacity: 1;
+}
+
+.ws-shot.on {
+  opacity: 1;
+  border-color: var(--accent);
+}
+
+.ws-shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 /* ---------------------- 浏览创意工坊（beta） ---------------------- */
+
 
 .browse {
   flex: 1;

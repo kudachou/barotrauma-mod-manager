@@ -25,6 +25,7 @@ import type {
   BrowseItem,
   BrowseResult,
   BrowseTagsResult,
+  WorkshopMedia,
   WorkshopSort
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
@@ -556,8 +557,7 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       items: filtered.slice(start, start + per)
     };
   },
-  browseWorkshopTags: async (): Promise<BrowseTagsResult> => ({
-    needsKey: false,
+  browseWorkshopTags: async (): Promise<BrowseTagsResult> => ({    needsKey: false,
     error: null,
     tags: [
       { tag: 'Item', count: 68 },
@@ -586,8 +586,17 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
     ]
   }),
 
+  // 预览模式：没有截图（线上要读工坊页面），但只要不报错，详情弹窗就能走通
+  getWorkshopMedia: async (id: string, _force?: boolean): Promise<WorkshopMedia> => ({
+    id: String(id || ''),
+    cover: null,
+    screenshots: [],
+    missing: false,
+    error: null
+  }),
+
   // 预览模式：给一段示例描述，用来展示工坊描述的排版效果
-  getWorkshopDetails: async (id: string): Promise<WorkshopDetails | null> => {
+  getWorkshopDetails: async (id: string, _force?: boolean): Promise<WorkshopDetails | null> => {
     const m = state.mods.find((x) => x.source === 'workshop' && x.id === id);
     if (!m) return null;
     return {

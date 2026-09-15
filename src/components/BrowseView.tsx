@@ -3,6 +3,7 @@ import type { BrowseItem, BrowseResult, ModInfo, WorkshopSort } from '../types';
 import { api, placeholderHue } from '../api';
 import { initials } from '../ui';
 import { IconAlert, IconExternal, IconRefresh, IconSearch } from './Icons';
+import BrowseDetailModal from './BrowseDetailModal';
 
 /**
  * 浏览创意工坊（beta）。
@@ -55,6 +56,7 @@ export default function BrowseView({
   const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
   const [tagsError, setTagsError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [detail, setDetail] = useState<BrowseItem | null>(null);
   const [result, setResult] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [broken, setBroken] = useState<Set<string>>(new Set());
@@ -331,7 +333,7 @@ export default function BrowseView({
               const showImg = it.previewUrl && !broken.has(it.id);
               const owned = ownedIds.has(it.id);
               return (
-                <div className="card" key={it.id} title={it.title}>
+                <div className="card" key={it.id} title={it.title} onClick={() => setDetail(it)}>
                   <div className="card-cover">
                     {showImg ? (
                       <img
@@ -369,7 +371,7 @@ export default function BrowseView({
                   </div>
 
                   <div className="card-body">
-                    <div className="card-name" style={{ cursor: 'default' }}>
+                    <div className="card-name" style={{ cursor: 'pointer' }}>
                       {it.title}
                     </div>
                     <div className="browse-meta">
@@ -386,8 +388,21 @@ export default function BrowseView({
                     </div>
                     <div className="browse-actions">
                       <button
+                        className="btn sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDetail(it);
+                        }}
+                        title="看描述与截图"
+                      >
+                        详情
+                      </button>
+                      <button
                         className="btn sm primary"
-                        onClick={() => void openInSteam(it)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void openInSteam(it);
+                        }}
                         title="在 Steam 客户端里打开这个条目 —— 直接在客户端里点「订阅」"
                       >
                         <IconExternal size={13} />
@@ -395,7 +410,10 @@ export default function BrowseView({
                       </button>
                       <button
                         className="btn sm"
-                        onClick={() => void openWeb(it)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void openWeb(it);
+                        }}
                         title="用浏览器打开网页版的工坊页面"
                       >
                         网页版
@@ -426,14 +444,25 @@ export default function BrowseView({
           )}
 
           <div className="browse-note">
-            订阅走 Steam 自己：点「<b>在 Steam 里打开</b>」→ 在 Steam 客户端里点「订阅」
-            （按钮换成「网页版」就用浏览器打开，效果一样）→ 下载完成后回到本管理器，
-            点顶栏的「同步到游戏」把新装的 mod 同步进游戏（本页刻意不做下载，免得引入 SteamCMD 依赖）。
+            点卡片看<b>描述与截图</b>；订阅走 Steam 自己：点「<b>在 Steam 里打开</b>」→
+            在 Steam 客户端里点「订阅」（按钮换成「网页版」就用浏览器打开，效果一样）→
+            下载完成后回到本管理器，点顶栏的「同步到游戏」把新装的 mod 同步进游戏
+            （本页刻意不做下载，免得引入 SteamCMD 依赖）。
             <br />
-            本页的数据都来自 Steam 官方接口，所以<b>必须能访问 Steam</b>
+            本页的数据都来自 Steam 官方接口/页面，所以<b>必须能访问 Steam</b>
             —— 国内一般要先开加速器/代理，否则会一直「连不上 Steam」。
           </div>
         </>
+      )}
+
+      {detail && (
+        <BrowseDetailModal
+          item={detail}
+          onClose={() => setDetail(null)}
+          onToast={onToast}
+          onOpenInSteam={openInSteam}
+          onOpenWeb={openWeb}
+        />
       )}
     </div>
   );

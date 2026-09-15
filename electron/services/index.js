@@ -25,6 +25,7 @@ const { listSaves } = require('./saves');
 const { installStatus, pendingSyncOf, planInstallSync, runInstallSync } = require('./installsync');
 const { browse: browseWorkshop, browseTags: browseWorkshopTags } = require('./workshopbrowse');
 const { openWorkshopInSteam } = require('./openinsteam');
+const { getMedia: getWorkshopMedia } = require('./workshoppage');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -739,6 +740,11 @@ function registerIpc() {
   /** 分类标签：从接口结果里统计出来，不硬编码 */
   ipcMain.handle('workshop:browseTags', () =>
     browseWorkshopTags({ key: getApiKey(userDataDir()) })
+  );
+
+  /** 浏览页详情：工坊条目页面里的封面与截图（截图那个接口不给，只能读页面） */
+  ipcMain.handle('workshop:media', (_e, id, force) =>
+    getWorkshopMedia(id, { cacheDir: path.join(userDataDir(), 'workshop-pages'), force: !!force })
   );
 }
 

@@ -1257,6 +1257,46 @@ try {
 
     const nowhere = ois.openWorkshopInSteam({}, '12345', { findExe: () => null });
     ok(!nowhere.ok && !!nowhere.error, '两条路都走不通时如实返回失败（由界面再用网页版兜底）');
+
+    /* ---- 详情弹窗用的图片：从工坊页面 HTML 里抽（截图那个接口不给） ---- */
+    console.log('\n[16] 从工坊页面抽封面与截图');
+
+    const wp = require('../electron/services/workshoppage');
+    const A = 'https://images.steamusercontent.com/ugc/14891511267770665986/3D180E704BC7CC738D46C53FF6D0D157EF75E7DF/';
+    const B = 'https://images.steamusercontent.com/ugc/1702908984265125997/150372181C9EB3D4E066B567537B5EAFE87E47CA/';
+    // 页面里同一个基础地址会出现多种尺寸（主图 5000、缩略图 637、小图 116），要按基础地址去重
+    const html =
+      '<div class="highlight_player_area">' +
+      `<img src="${A}?imw=512&amp;&amp;ima=fit">` +
+      `<img class="workshopItemPreviewImageEnlargeable" src="${A}?imw=5000&imh=5000&amp;letterbox=false">` +
+      `<img src="${A}?imw=116&imh=65">` +
+      `<img src="${B}?imw=637&imh=358">` +
+      '<img src="https://community.fastly.steamstatic.com/public/images/trans.gif">' +
+      '</div>';
+
+    const media = wp.extractMedia(html);
+    ok(media.screenshots.length === 2, `同一张图的不同尺寸只算一次（实际 ${media.screenshots.length} 张）`);
+    ok(media.cover === A + wp.FULL_PARAMS, '封面用第一张的全尺寸地址');
+    ok(media.screenshots[0].thumb === A + wp.DISPLAY_PARAMS, '缩略图拼上页面自己用的尺寸参数');
+    ok(
+      /steamstatic\.com/.test(html) && media.screenshots.every((s) => /steamusercontent/.test(s.thumb)),
+      '只收 steamusercontent 的图片（页面的图标/logo 不要）'
+    );
+    const empty = wp.extractMedia('<html><body>没有图片</body></html>');
+    ok(empty.cover === null && empty.screenshots.length === 0, '没有图片时返回空，不报错');
+    ok(!wp.looksMissing('<title>Steam 创意工坊::Lua For Barotrauma</title>'), '正常页面不判成"看不到条目"');
+    ok(
+      wp.looksMissing('<title>Steam 社区 :: 错误</title>'),
+      '页面是「错误」时判为条目看不到（下架/私有）'
+    );
+
+    let badMediaId = false;
+    try {
+      await wp.getMedia('12/../../evil', { fetchText: async () => '' });
+    } catch {
+      badMediaId = true;
+    }
+    ok(badMediaId, '非法 id 被拒（这个函数会去抓页面，更不能让 id 乱跑）');
   } catch (e) {
     console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
     failures++;

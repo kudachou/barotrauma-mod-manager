@@ -56,6 +56,10 @@
     而且**必须能访问 Steam**（国内一般需要加速器，否则提示「连不上 Steam」）
   - 分类标签**不是硬编码**：抓 3 个榜单各 100 条统计出来的（缓存 6 小时），Steam 那边改标签能自动跟上
 - 卡片上标出「已有」（本地库里已经有这个条目），还能看订阅数/收藏数/更新日期/分类
+- **点卡片看详情**：封面 + **截图画廊**（点缩略图可切换）、订阅/收藏/浏览/创建日期、分类标签，
+  以及**工坊描述的完整排版**（BBCode → 安全节点，跟 Mod 详情页同一套渲染）
+  - 描述来自 `GetPublishedFileDetails`（带 BBCode 描述）；**截图那个接口不给**，
+    只能读工坊页面 HTML —— 好消息是页面里直接写了全尺寸 URL（`imw=5000`），不用跑 JS
 - **下载交给 Steam**：点「在 Steam 里打开」→ 在 Steam 客户端里点「订阅」→ 回到管理器点顶栏
   「同步到游戏」把它装进游戏。旁边有「网页版」按钮兜底
   - 实测：`steam://url/CommunityFilePage/<id>` 有效，但**走 ShellExecute 不可靠**，
@@ -430,6 +434,7 @@ electron/            主进程
     installsync.js   把 Steam 已下载、游戏还没装的工坊更新同步进 Installed
     workshopbrowse.js 浏览创意工坊（QueryFiles：搜索/排序/分类统计）
     openinsteam.js    在 Steam 客户端里打开工坊页面（直接调 steam.exe）
+    workshoppage.js   从工坊页面 HTML 里抽封面与截图（详情弹窗用）
     steam.js         工坊封面（公开接口 + 缓存）
     categories.js    分类规则与标签持久化
     relations.js     mod 之间的关联（前置需求）

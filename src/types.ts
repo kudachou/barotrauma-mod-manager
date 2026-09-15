@@ -178,6 +178,17 @@ export interface BrowseTagsResult {
   cached?: boolean;
 }
 
+/** 工坊条目页面里的图片（封面 + 截图） */
+export interface WorkshopMedia {
+  id: string;
+  cover: string | null;
+  screenshots: { thumb: string; full: string }[];
+  /** 页面显示条目已不存在（下架/私有） */
+  missing: boolean;
+  error: string | null;
+  fetchedAt?: number;
+}
+
 /* ---------------------- 工坊更新同步进游戏（install sync） ---------------------- */
 
 export type InstallSyncReason = 'outdated' | 'not-installed' | 'version-differs';

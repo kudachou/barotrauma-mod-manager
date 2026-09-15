@@ -860,6 +860,41 @@ app.whenReady().then(async () => {
   );
   await shot(win, '24-browse');
 
+  // 详情弹窗：点卡片打开，看封面区/描述/热度/按钮
+  const openedDetail = await win.webContents.executeJavaScript(`(() => {
+    const c = document.querySelector('.browse .card');
+    if (!c) return false;
+    c.click();
+    return true;
+  })()`);
+  await sleep(1400);
+  console.log(
+    'browse-detail=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const m = document.querySelector('.modal');
+          if (!m) return { opened: false };
+          return {
+            opened: ${JSON.stringify(openedDetail)},
+            title: (m.querySelector('.modal-title') || {}).textContent || null,
+            hasCoverArea: !!m.querySelector('.ws-main'),
+            hasStats: !!m.querySelector('.ws-stats'),
+            descBlocks: m.querySelectorAll('.ws-body > *').length,
+            descHeadings: Array.from(m.querySelectorAll('.ws-h')).map((x) => x.textContent.trim()).slice(0, 2),
+            tags: m.querySelectorAll('.card-tags .tag').length,
+            buttons: Array.from(m.querySelectorAll('.modal-foot button')).map((x) => x.textContent.trim())
+          };
+        })()`)
+      )
+  );
+  await shot(win, '25-browse-detail');
+  await win.webContents.executeJavaScript(`(() => {
+    const b = Array.from(document.querySelectorAll('.modal-foot button')).find((x) => x.textContent.trim() === '关闭');
+    if (b) b.click();
+    return !!b;
+  })()`);
+  await sleep(400);
+
   console.log('ERRORS ' + JSON.stringify(errors, null, 1));
   app.exit(0);
 });
