@@ -826,7 +826,7 @@ app.whenReady().then(async () => {
   })()`);
   await sleep(400);
 
-  /* --------------------------- 浏览工坊（beta） --------------------------- */
+  /* --------------------------- 浏览工坊 --------------------------- */
   // 预览模式（无 preload）下走 api.ts 里的示例搜索结果
   await win.webContents.executeJavaScript(
     `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('浏览工坊')).click()`

@@ -6,7 +6,7 @@ import { IconAlert, IconExternal, IconRefresh, IconSearch } from './Icons';
 import BrowseDetailModal from './BrowseDetailModal';
 
 /**
- * 浏览创意工坊（beta）。
+ * 浏览创意工坊。
  *
  * 数据来自官方 `IPublishedFileService/QueryFiles` —— 唯一能真正搜索/排序工坊的接口，
  * **必须配 Steam Web API Key**（没有 key 会 403）。

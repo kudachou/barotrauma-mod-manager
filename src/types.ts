@@ -134,7 +134,7 @@ export interface ScanResult {
 
 export type ViewKey = 'library' | 'browse' | 'collections' | 'saves' | 'settings';
 
-/* ------------------------- 浏览创意工坊（beta） ------------------------- */
+/* ------------------------- 浏览创意工坊 ------------------------- */
 
 export type WorkshopSort = 'popular' | 'trend' | 'updated' | 'newest' | 'top';
 
