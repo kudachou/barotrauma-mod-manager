@@ -114,6 +114,23 @@ export default function SyncModal({
             </div>
           )}
 
+          {phase === 'ready' && plan && plan.skippedDelisted.length > 0 && (
+            <div className="hint" style={{ marginTop: plan.count > 0 ? 14 : 0, marginBottom: 0 }}>
+              另有 <b>{plan.skippedDelisted.length}</b> 个<b>工坊上已下架</b>的 mod
+              游戏里没装（Steam 缓存里还留着内容）：
+              {plan.skippedDelisted.map((x) => (
+                <span className="badge" key={x.id} style={{ marginLeft: 4 }}>
+                  {x.name}
+                </span>
+              ))}
+              <div style={{ marginTop: 6 }}>
+                这些<b>不在这里同步</b> —— 条目已经没了，游戏本来就不会装它们，也不会有更新。
+                想留住它们请用顶部「备份工坊 mod」→「只备份已下架的」，存成
+                <code>LocalMods</code> 里的本地 mod。
+              </div>
+            </div>
+          )}
+
           {phase === 'ready' && plan && plan.count > 0 && (
             <>
               <div className="bk-stats">

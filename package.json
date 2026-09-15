@@ -1,7 +1,7 @@
 {
   "name": "barotrauma-mod-manager",
   "productName": "潜渊症Mod管理器",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "潜渊症（Barotrauma）Mod 管理器：合集编排、一键应用到游戏、本地 mod 与创意工坊版本对比、封面、按功能分类",
   "main": "electron/main.js",
   "author": "kudachou",

@@ -45,7 +45,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { copyDir, dirStats, rmrf } = require('./fsutil');
 const { scanDir, stripBom } = require('./mods');
-const { readWorkshopAcf, installTimeOf } = require('./workshopsync');
+const { readWorkshopAcf, installTimeOf, isDelisted } = require('./workshopsync');
 
 const BOM = '\uFEFF';
 
@@ -97,24 +97,52 @@ function installStatus(settings, acf, mod) {
 }
 
 /**
+ * 这个 mod 算不算「有待同步的更新」。
+ *
+ * 有一种状态**不能**算：**已下架 + 游戏里从没装过**。
+ * 用户真实数据里的例子：`3156077899`（官方接口确认 exists=false）——
+ * Steam 缓存里还留着内容、`.acf` 里 timeupdated == latest_timeupdated（根本没更新过），
+ * 而游戏从来没装过它：因为条目都没了，游戏当然装不了。
+ * 那不是"忘了同步"，是**下架残留**，该走「备份工坊 mod」存成本地 mod 那条路。
+ * 所以这里把它排除掉，单列出来告诉用户，而不是混进"待同步"里让人白点一下。
+ *
+ * 注意只排除 `not-installed` 这一种：已经装在游戏里的 mod 就算来源下架了，
+ * 只要 Steam 那份确实更新过，同步过去仍然是对的。
+ */
+function pendingSyncOf(settings, acf, checks, mod) {
+  const st = installStatus(settings, acf, mod);
+  if (!st.pending) return st;
+  if (st.reason === 'not-installed' && isDelisted(checks, mod.id)) {
+    return { ...st, pending: false, delistedNotInstalled: true };
+  }
+  return st;
+}
+
+/**
  * 找出所有「Steam 已下载、游戏还没装」的 mod。
  * @param {boolean} withBytes 是否统计体积（统计要遍历整个 mod 目录，列表展示时才需要）
+ * @param {object}  checks    下架检查缓存（readChecks 的结果），用来排除下架残留
  */
 function planInstallSync(settings, options = {}) {
-  const { withBytes = true, onStep } = options;
+  const { withBytes = true, onStep, checks = {} } = options;
   const steamRoot = settings.workshopModsDir || '';
   const instRoot = settings.installedWorkshopDir || '';
   const acf = readWorkshopAcf(steamRoot);
 
   const mods = scanDir('workshop', steamRoot);
   const items = [];
+  const skippedDelisted = [];
   let done = 0;
   for (const m of mods) {
     done++;
     if (onStep && done % 10 === 0) onStep(done, mods.length, m.name);
     if (!instRoot) continue;
     if (!fs.existsSync(path.join(steamRoot, m.id, 'filelist.xml'))) continue;
-    const st = installStatus(settings, acf, m);
+    const st = pendingSyncOf(settings, acf, checks, m);
+    if (st.delistedNotInstalled) {
+      skippedDelisted.push({ id: m.id, name: m.name, steamVersion: m.modVersion });
+      continue;
+    }
     if (!st.pending) continue;
     const item = {
       id: m.id,
@@ -135,11 +163,14 @@ function planInstallSync(settings, options = {}) {
     items.push(item);
   }
   items.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh'));
+  skippedDelisted.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh'));
   return {
     items,
     count: items.length,
     totalBytes: items.reduce((s, i) => s + i.bytes, 0),
     totalFiles: items.reduce((s, i) => s + i.files, 0),
+    /** 已下架、游戏里没装的：不是"待同步"，界面上单独说明 */
+    skippedDelisted,
     acfAvailable: acf.available,
     acfReason: acf.reason || null,
     workshopDir: steamRoot,
@@ -251,6 +282,7 @@ function runInstallSync(settings, items, hooks = {}) {
 
 module.exports = {
   installStatus,
+  pendingSyncOf,
   planInstallSync,
   runInstallSync,
   writeInstallTime,

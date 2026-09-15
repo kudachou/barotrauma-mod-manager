@@ -22,7 +22,7 @@ const {
 } = require('./modlists');
 const { applyToGame, readAppliedPackages } = require('./config');
 const { listSaves } = require('./saves');
-const { installStatus, planInstallSync, runInstallSync } = require('./installsync');
+const { installStatus, pendingSyncOf, planInstallSync, runInstallSync } = require('./installsync');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -217,7 +217,7 @@ function scanAll() {
     m.installPending = false;
     m.installInstalledVersion = null;
     if (m.source === 'workshop' && !m.installedOnly && acfForInstall) {
-      const st = installStatus(s, acfForInstall, m);
+      const st = pendingSyncOf(s, acfForInstall, checks, m);
       m.installPending = st.pending;
       m.installInstalledVersion = st.installedVersion;
       if (st.pending) installPendingCount++;
@@ -676,6 +676,7 @@ function registerIpc() {
   /** 只查不写：列出「Steam 已下载、游戏还没装」的 mod 及体积 */
   ipcMain.handle('installsync:plan', (event) =>
     planInstallSync(getSettings(), {
+      checks: readChecks(userDataDir()),
       onStep: (done, total, current) =>
         send(event.sender, 'installsync:progress', { phase: 'planning', done, total, current })
     })
@@ -688,7 +689,7 @@ function registerIpc() {
     syncRunning = true;
     syncCancelled = false;
     try {
-      const plan = planInstallSync(s);
+      const plan = planInstallSync(s, { checks: readChecks(userDataDir()) });
       return runInstallSync(s, plan.items, {
         onProgress: (p) => send(sender, 'installsync:progress', p),
         isCancelled: () => syncCancelled

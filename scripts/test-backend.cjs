@@ -988,6 +988,41 @@ try {
   ok(!syIds.includes('70004'), '只剩 Installed 的（工坊已没有来源）不进计划');
   ok(syPlan.totalBytes > 0, '给出总体积');
 
+  /* 已下架 + 游戏里没装 ≠ 待同步（用户真实数据里的 3156077899 就是这个）
+     Steam 缓存里还留着内容，但条目已经没了、游戏本来就不会装它，也不会有更新。
+     这种要单列出来、指到「备份已下架的」那条路，而不是让人白点一次同步。
+     用独立目录测，免得跟上面已经同步过的状态纠缠在一起。 */
+  const dlWs = path.join(TMP, 'sync-delisted', '602960');
+  const dlInst = path.join(TMP, 'sync-delisted', 'Installed');
+  writeTree(dlWs, '91001', { 'filelist.xml': flx('G', '1.0'), 'g.xml': '<g/>' }); // 下架 + 没装过
+  writeTree(dlWs, '91002', { 'filelist.xml': flx('H', '2.0') });
+  writeTree(dlInst, '91002', { 'filelist.xml': flx('H', '1.0', ' installtime="100"') }); // 下架但装着旧版
+  writeTree(dlWs, '91003', { 'filelist.xml': flx('I', '1.0') }); // 没装过，但没被判定下架
+  fs.writeFileSync(
+    path.join(TMP, 'sync-delisted', 'appworkshop_602960.acf'),
+    '"AppWorkshop"\n{\n\t"WorkshopItemDetails"\n\t{\n' +
+      '\t\t"91001"\n\t\t{\n\t\t\t"timeupdated"\t\t"2000"\n\t\t}\n' +
+      '\t\t"91002"\n\t\t{\n\t\t\t"timeupdated"\t\t"2000"\n\t\t}\n' +
+      '\t\t"91003"\n\t\t{\n\t\t\t"timeupdated"\t\t"2000"\n\t\t}\n' +
+      '\t}\n}\n',
+    'utf8'
+  );
+  const dlSettings = { workshopModsDir: dlWs, installedWorkshopDir: dlInst };
+  const dlPlan = isync.planInstallSync(dlSettings, {
+    checks: { '91001': { exists: false }, '91002': { exists: false }, '91003': { exists: true } }
+  });
+  const dlIds = dlPlan.items.map((i) => i.id).sort();
+  ok(!dlIds.includes('91001'), '已下架且游戏里没装 → 不算「待同步」');
+  ok(
+    dlPlan.skippedDelisted.length === 1 && dlPlan.skippedDelisted[0].id === '91001',
+    '但单列出来告诉用户（skippedDelisted）'
+  );
+  ok(
+    dlIds.includes('91002'),
+    '下架但游戏里装着旧版 → 仍然同步（不能一刀切把下架的全排除）'
+  );
+  ok(dlIds.includes('91003'), '只是没装过、并没有下架 → 照常算待同步');
+
   const syRun = isync.runInstallSync(sySettings, syPlan.items);
   ok(syRun.failed.length === 0, `没有失败项${syRun.failed.length ? '：' + JSON.stringify(syRun.failed) : ''}`);
   ok(syRun.synced.length === 2, '同步了 2 个');

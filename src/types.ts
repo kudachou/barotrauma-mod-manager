@@ -155,6 +155,8 @@ export interface InstallSyncPlan {
   count: number;
   totalBytes: number;
   totalFiles: number;
+  /** 已下架、游戏里没装的：不是「待同步」，另有说明 */
+  skippedDelisted: { id: string; name: string; steamVersion: string | null }[];
   acfAvailable: boolean;
   acfReason: string | null;
   workshopDir: string;

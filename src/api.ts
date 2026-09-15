@@ -491,6 +491,7 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
       count: items.length,
       totalBytes: items.reduce((s, x) => s + x.bytes, 0),
       totalFiles: items.reduce((s, x) => s + x.files, 0),
+      skippedDelisted: [],
       acfAvailable: true,
       acfReason: null,
       workshopDir: '（预览模式）\\steamapps\\workshop\\content\\602960',

@@ -60,6 +60,23 @@ function fixtures() {
   writeMod(WS, '2710000001', { 'filelist.xml': fl('Another', '1.0') });
   writeMod(INST, '2710000001', { 'filelist.xml': fl('Another', '1.0', ' installtime="2000"') });
 
+  // C：工坊上已下架、游戏里从没装过（真实数据里的 3156077899 就是这种）
+  //    Steam 缓存里还留着内容，但条目已经没了 —— 这不是「待同步」，该走「备份已下架的」
+  writeMod(WS, '3156077899', { 'filelist.xml': fl('DelistedThing', '1.2'), 'big/pack.bin': 'x' });
+  fs.writeFileSync(
+    path.join(USERDATA, 'workshop-checks.json'),
+    JSON.stringify(
+      {
+        '3156077899': { exists: false, how: 'apikey', checkedAt: Date.now() },
+        '3680309446': { exists: true, how: 'apikey', checkedAt: Date.now() },
+        '2710000001': { exists: true, how: 'apikey', checkedAt: Date.now() }
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+
   fs.writeFileSync(
     path.join(TMP, 'steam', 'workshop', 'appworkshop_602960.acf'),
     '"AppWorkshop"\n{\n\t"appid"\t\t"602960"\n\t"WorkshopItemDetails"\n\t{\n' +
@@ -181,6 +198,17 @@ app.whenReady().then(async () => {
   ok(!!txt && txt.includes('不会让 Steam 把整包重下一遍'), '说明了与游戏内更新的区别');
   ok(!!txt && txt.includes('关掉游戏'), '提示了文件占用的情况');
   ok(!!txt && txt.includes('开始同步（1 个）'), '有开始同步按钮');
+
+  // 已下架的那种要被排除，但明确告诉用户（不能假装它不存在）
+  ok(!!txt && txt.includes('DelistedThing') && txt.includes('不在这里同步'), '已下架的单独说明并指到「备份已下架的」');
+  ok(
+    !!txt && txt.includes('备份工坊 mod'),
+    '给出了正确去处：备份工坊 mod → 只备份已下架的'
+  );
+  const pendingRow = await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.modal .bk-row')).map((x) => x.textContent).join(' ')`
+  );
+  ok(!pendingRow.includes('DelistedThing'), '「待同步」列表里没有那个已下架的 mod');
 
   // 执行
   ok(await win.webContents.executeJavaScript(clickBtn('开始同步')), '点「开始同步」');
