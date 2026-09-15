@@ -105,5 +105,8 @@ contextBridge.exposeInMainWorld('api', {
   openPath: (p) => invoke('shell:openPath', p),
   openModFolder: (p) => invoke('shell:openPath', p),
   openExternal: (url) => invoke('shell:openExternal', url),
-  getWorkshopPage: (id) => invoke('shell:openExternal', `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`)
+  getWorkshopPage: (id) => invoke('shell:openExternal', `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`),
+
+  // 浏览创意工坊（要 Steam Web API Key）
+  browseWorkshop: (params) => invoke('workshop:browse', params)
 });

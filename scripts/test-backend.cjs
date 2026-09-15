@@ -1093,6 +1093,88 @@ try {
   failures++;
 }
 
-fs.rmSync(TMP, { recursive: true, force: true });
-console.log(failures ? `\n=== ${failures} 项失败 ===` : '\n=== 全部通过 ===');
-process.exit(failures ? 1 : 0);
+/* -------- 14. 浏览创意工坊（QueryFiles）：只测参数组装与归一化，不联网 -------- */
+(async () => {
+  try {
+    console.log('\n[14] 浏览创意工坊（参数与归一化）');
+    const wb = require('../electron/services/workshopbrowse');
+
+    const u1 = wb.buildQueryUrl({ sort: 'popular', page: 3, numPerPage: 24 }, 'KEY');
+    ok(/query_type=12/.test(u1.url), '「最热门」映射到 query_type=12（按订阅数）');
+    ok(/page=3/.test(u1.url) && /numperpage=24/.test(u1.url), '页码与每页条数写进 URL');
+    ok(/return_metadata=true/.test(u1.url), '带上 return_metadata（否则没有订阅数/标签/预览图）');
+    ok(/appid=602960/.test(u1.url) && /key=KEY/.test(u1.url), '带 appid 与 key');
+
+    const u2 = wb.buildQueryUrl({ sort: 'popular', search: ' lua ' }, 'K');
+    ok(/query_type=11/.test(u2.url), '有搜索词时改用 query_type=11（文本搜索）');
+    ok(/search_text=lua/.test(u2.url), '搜索词去掉首尾空格后传进去');
+    ok(u2.sort === 'popular', '搜索时排序仍然记着，供界面回显');
+
+    const u3 = wb.buildQueryUrl({ sort: 'newest', numPerPage: 999 }, 'K');
+    ok(/query_type=1/.test(u3.url), '「最新发布」映射到 query_type=1');
+    ok(/numperpage=100/.test(u3.url), `每页上限压到 100（实际 ${u3.numPerPage}）`);
+    ok(wb.buildQueryUrl({ page: 0 }, 'K').page === 1, '页码非法时回到第 1 页');
+
+    const u4 = wb.buildQueryUrl({ tag: 'Total conversion' }, 'K');
+    ok(
+      /requiredtags%5B0%5D=Total\+conversion|requiredtags\[0\]=Total/.test(u4.url),
+      '标签要用 requiredtags[0] 数组写法（普通字符串会被 Steam 忽略）'
+    );
+
+    // 归一化：接口字段又长又乱，界面只认这几个
+    const it = wb.normalizeItem({
+      publishedfileid: '2559634234',
+      title: 'LuaCsForBarotrauma',
+      preview_url: '  https://x/y.jpg  ',
+      subscriptions: 686618,
+      favorited: 24273,
+      views: 554390,
+      time_updated: 1789472317,
+      file_size: '195295315',
+      tags: [{ tag: 'Library' }, { tag: '' }, null]
+    });
+    ok(it.id === '2559634234' && it.title === 'LuaCsForBarotrauma', '归一化基本字段');
+    ok(it.previewUrl === 'https://x/y.jpg', '预览图 URL 去掉空白');
+    ok(it.subscriptions === 686618 && it.views === 554390, '订阅数/浏览量转成数字');
+    ok(it.tags.join(',') === 'Library', '标签去掉空值');
+    ok(
+      it.pageUrl === 'https://steamcommunity.com/sharedfiles/filedetails/?id=2559634234',
+      '生成工坊页面地址（点订阅用的就是它）'
+    );
+
+    // 没 key：明确返回 needsKey，不联网、不抛错（QueryFiles 没 key 是 403）
+    let called = false;
+    const noKey = await wb.browse({}, { key: '', getJson: async () => { called = true; return {}; } });
+    ok(noKey.needsKey === true && noKey.items.length === 0, '没配 key 时返回 needsKey');
+    ok(!called, '没 key 时压根不发请求');
+
+    // 正常路径：注入假 transport，断言参数确实发出去了
+    let seen = '';
+    const fake = {
+      response: {
+        total: 82890,
+        publishedfiledetails: [
+          { publishedfileid: '1', title: 'A', subscriptions: 5, tags: [{ tag: 'X' }] },
+          { result: 1 }
+        ]
+      }
+    };
+    const r = await wb.browse({ sort: 'trend', page: 2 }, { key: 'K', getJson: async (u) => { seen = u; return fake; } });
+    ok(/query_type=3/.test(seen), '实际请求带上了选定的排序');
+    ok(r.total === 82890 && r.page === 2, '把 total 与页码带回去给界面做分页');
+    ok(r.items.length === 1, '没有 id 的脏条目被丢掉');
+
+    // 出错时给可操作的说法，而不是把 ECONNRESET 甩给用户
+    const err = await wb.browse({}, { key: 'K', getJson: async () => { throw new Error('HTTP 403'); } });
+    ok(/API Key/.test(err.error || ''), '403 时提示是 Key 的问题');
+    const err2 = await wb.browse({}, { key: 'K', getJson: async () => { throw new Error('ECONNRESET'); } });
+    ok(/连不上 Steam/.test(err2.error || ''), '网络错误时给出人话');
+  } catch (e) {
+    console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
+    failures++;
+  }
+
+  fs.rmSync(TMP, { recursive: true, force: true });
+  console.log(failures ? `\n=== ${failures} 项失败 ===` : '\n=== 全部通过 ===');
+  process.exit(failures ? 1 : 0);
+})();

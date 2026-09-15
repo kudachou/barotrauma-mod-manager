@@ -132,8 +132,19 @@ function bindEvents() {
   );
 }
 
+/**
+ * 带 -beta / -rc 之类的预发布版本不做自动更新检查。
+ *
+ * 原因：这类测试版的版本号通常**低于**已发布的正式版（比如测试版 0.0.1-beta vs 正式版 0.2.7），
+ * 一检查就会提示"有新版本"，点下去等于把测试版覆盖回旧正式版，正好把要测的东西弄丢了。
+ * 预发布版要升级就手动装正式包。
+ */
+function isPrerelease() {
+  return /-/i.test(String(app.getVersion() || ''));
+}
+
 async function check() {
-  if (!isSupported()) {
+  if (!isSupported() || isPrerelease()) {
     return setState({ status: 'unsupported', supported: false, error: null, checkedAt: Date.now() });
   }
   if (state.status === 'checking' || state.status === 'downloading') return snapshot();

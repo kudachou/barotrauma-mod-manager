@@ -826,6 +826,31 @@ app.whenReady().then(async () => {
   })()`);
   await sleep(400);
 
+  /* --------------------------- 浏览工坊（beta） --------------------------- */
+  // 预览模式（无 preload）下走 api.ts 里的示例搜索结果
+  await win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('.nav-item')).find((x) => x.textContent.trim().startsWith('浏览工坊')).click()`
+  );
+  await sleep(1200);
+  console.log(
+    'browse=' +
+      JSON.stringify(
+        await win.webContents.executeJavaScript(`(() => {
+          const card = document.querySelector('.browse .card');
+          return {
+            cards: document.querySelectorAll('.browse .card').length,
+            first: card ? card.textContent.replace(/\\s+/g, ' ').trim().slice(0, 110) : null,
+            total: (document.querySelector('.browse-total') || {}).textContent || null,
+            sorts: Array.from(document.querySelectorAll('.browse-sorts .tag-toggle')).map((x) => x.textContent.trim()),
+            buttons: Array.from(document.querySelectorAll('.browse-actions button')).slice(0, 2).map((x) => x.textContent.trim()),
+            pager: (document.querySelector('.browse-pager') || {}).textContent || null,
+            owned: document.querySelectorAll('.browse .badge.st-backup-ok').length
+          };
+        })()`)
+      )
+  );
+  await shot(win, '24-browse');
+
   console.log('ERRORS ' + JSON.stringify(errors, null, 1));
   app.exit(0);
 });

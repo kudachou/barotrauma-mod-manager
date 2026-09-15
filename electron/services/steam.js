@@ -16,11 +16,18 @@ const API_BATCH = 50;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function request(urlStr, { method = 'GET', headers = {}, body = null } = {}, attempt = 0) {
+function request(urlStr, opts = {}, attempt = 0) {
+  const { method = 'GET', headers = {}, body = null, timeoutMs = 20000, retries = 2 } = opts;
   return new Promise((resolve, reject) => {
     const u = new URL(urlStr);
     const h = { 'User-Agent': UA, ...headers };
     if (body) h['Content-Length'] = Buffer.byteLength(body);
+
+    const again = () =>
+      sleep(800 * (attempt + 1)).then(
+        () => resolve(request(urlStr, opts, attempt + 1)),
+        reject
+      );
 
     const req = https.request(
       { hostname: u.hostname, port: u.port || 443, path: u.pathname + u.search, method, headers: h },
@@ -28,12 +35,9 @@ function request(urlStr, { method = 'GET', headers = {}, body = null } = {}, att
         const code = res.statusCode || 0;
 
         // 限流 / 服务端抖动：退避重试
-        if ((code === 429 || code >= 500) && attempt < 2) {
+        if ((code === 429 || code >= 500) && attempt < retries) {
           res.resume();
-          sleep(1000 * (attempt + 1)).then(
-            () => resolve(request(urlStr, { method, headers, body }, attempt + 1)),
-            reject
-          );
+          again();
           return;
         }
 
@@ -58,8 +62,16 @@ function request(urlStr, { method = 'GET', headers = {}, body = null } = {}, att
         res.on('error', reject);
       }
     );
-    req.on('error', reject);
-    req.setTimeout(20000, () => req.destroy(new Error('请求超时')));
+    req.on('error', (e) => {
+      // 网络抖动（实测被 Steam 掐连接会出现 ECONNRESET）也退避重试一次，别直接判失败
+      const code = String((e && (e.code || e.message)) || '');
+      if (attempt < retries && /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|请求超时/i.test(code)) {
+        again();
+        return;
+      }
+      reject(e);
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('请求超时')));
     if (body) req.write(body);
     req.end();
   });
@@ -237,6 +249,7 @@ function createQueue(concurrency, delayMs) {
 }
 
 module.exports = {
+  request,
   fetchDetails,
   getWorkshopDetails,
   downloadPreview,

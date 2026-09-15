@@ -132,7 +132,37 @@ export interface ScanResult {
   installPendingCount?: number;
 }
 
-export type ViewKey = 'library' | 'collections' | 'saves' | 'settings';
+export type ViewKey = 'library' | 'browse' | 'collections' | 'saves' | 'settings';
+
+/* ------------------------- 浏览创意工坊（beta） ------------------------- */
+
+export type WorkshopSort = 'popular' | 'trend' | 'newest';
+
+export interface BrowseItem {
+  id: string;
+  title: string;
+  previewUrl: string | null;
+  subscriptions: number;
+  favorited: number;
+  views: number;
+  /** 秒 */
+  timeUpdated: number;
+  fileSize: number;
+  tags: string[];
+  pageUrl: string;
+}
+
+export interface BrowseResult {
+  /** 没配 Steam Web API Key —— 这个接口没 key 会 403 */
+  needsKey: boolean;
+  error: string | null;
+  total: number;
+  page: number;
+  numPerPage: number;
+  sort?: WorkshopSort;
+  search?: string;
+  items: BrowseItem[];
+}
 
 /* ---------------------- 工坊更新同步进游戏（install sync） ---------------------- */
 

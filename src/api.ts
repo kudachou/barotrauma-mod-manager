@@ -21,7 +21,10 @@ import type {
   InstallSyncPlan,
   InstallSyncItem,
   InstallSyncProgress,
-  InstallSyncResult
+  InstallSyncResult,
+  BrowseItem,
+  BrowseResult,
+  WorkshopSort
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -510,6 +513,43 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   },
   cancelInstallSync: async (): Promise<boolean> => true,
   onInstallSyncProgress: (_cb: (p: InstallSyncProgress) => void): (() => void) => () => {},
+
+  // 预览模式：拿内置示例数据假装是工坊搜索结果
+  browseWorkshop: async (params?: any): Promise<BrowseResult> => {
+    const sort: WorkshopSort = (params?.sort as WorkshopSort) || 'popular';
+    const search = String(params?.search || '').trim();
+    const page = Number(params?.page || 1);
+    const per = 24;
+    const base: BrowseItem[] = state.mods
+      .filter((m) => m.source === 'workshop')
+      .slice(0, 30)
+      .map((m, i) => ({
+        id: m.id,
+        title: m.name,
+        previewUrl: null,
+        subscriptions: 686618 - i * 41235,
+        favorited: 24273 - i * 1337,
+        views: 554390 - i * 8211,
+        timeUpdated: Math.floor(Date.now() / 1000) - i * 86400,
+        fileSize: 1024 * 1024 * (12 + i * 7),
+        tags: ['Total conversion', 'Gameplay mechanics', 'QOL'].slice(0, (i % 3) + 1),
+        pageUrl: `https://steamcommunity.com/sharedfiles/filedetails/?id=${m.id}`
+      }));
+    const filtered = search
+      ? base.filter((x) => x.title.toLowerCase().includes(search.toLowerCase()))
+      : base;
+    const start = (Math.max(1, page) - 1) * per;
+    return {
+      needsKey: false,
+      error: null,
+      total: 82890,
+      page: Math.max(1, page),
+      numPerPage: per,
+      sort,
+      search,
+      items: filtered.slice(start, start + per)
+    };
+  },
 
   // 预览模式：给一段示例描述，用来展示工坊描述的排版效果
   getWorkshopDetails: async (id: string): Promise<WorkshopDetails | null> => {

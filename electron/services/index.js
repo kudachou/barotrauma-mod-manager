@@ -23,6 +23,7 @@ const {
 const { applyToGame, readAppliedPackages } = require('./config');
 const { listSaves } = require('./saves');
 const { installStatus, pendingSyncOf, planInstallSync, runInstallSync } = require('./installsync');
+const { browse: browseWorkshop } = require('./workshopbrowse');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
 const {
@@ -718,6 +719,12 @@ function registerIpc() {
     await shell.openExternal(u);
     return true;
   });
+
+  /* ---------------------------- 浏览创意工坊 ---------------------------- */
+
+  ipcMain.handle('workshop:browse', (_e, params) =>
+    browseWorkshop(params || {}, { key: getApiKey(userDataDir()) })
+  );
 }
 
 module.exports = { registerIpc, scanAll, app };

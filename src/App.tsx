@@ -15,6 +15,7 @@ import Sidebar from './components/Sidebar';
 import LibraryView from './components/LibraryView';
 import CollectionsView from './components/CollectionsView';
 import SavesView from './components/SavesView';
+import BrowseView from './components/BrowseView';
 import SettingsView from './components/SettingsView';
 import ModDetailModal from './components/ModDetailModal';
 import UpdateBanner from './components/UpdateBanner';
@@ -25,6 +26,7 @@ import { IconAlert, IconDownload, IconPlay, IconRefresh } from './components/Ico
 
 const TITLES: Record<ViewKey, { title: string; sub: string }> = {
   library: { title: 'Mod 库', sub: '浏览本地与创意工坊 mod，查看版本对比与分类' },
+  browse: { title: '浏览工坊（beta）', sub: '搜索创意工坊上的 mod，打开页面订阅后回到这里同步进游戏' },
   collections: { title: '合集', sub: '编排 mod 加载顺序，一键应用到游戏' },
   saves: { title: '存档', sub: '查看每个存档当时启用了哪些 mod，找到能用它实现该存档的合集' },
   settings: { title: '设置', sub: '指定游戏与 mod 目录位置' }
@@ -508,6 +510,10 @@ export default function App() {
                 setBackupOpen(true);
               }}
             />
+          )}
+
+          {view === 'browse' && (
+            <BrowseView mods={mods} onToast={pushToast} onGoSettings={() => setView('settings')} />
           )}
 
           {view === 'collections' && (
