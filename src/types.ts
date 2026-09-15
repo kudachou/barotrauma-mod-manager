@@ -136,7 +136,7 @@ export type ViewKey = 'library' | 'browse' | 'collections' | 'saves' | 'settings
 
 /* ------------------------- 浏览创意工坊（beta） ------------------------- */
 
-export type WorkshopSort = 'popular' | 'trend' | 'newest';
+export type WorkshopSort = 'popular' | 'trend' | 'updated' | 'newest' | 'top';
 
 export interface BrowseItem {
   id: string;
@@ -161,7 +161,21 @@ export interface BrowseResult {
   numPerPage: number;
   sort?: WorkshopSort;
   search?: string;
+  /** 当前生效的分类筛选 */
+  tags?: string[];
   items: BrowseItem[];
+}
+
+export interface BrowseTag {
+  tag: string;
+  count: number;
+}
+
+export interface BrowseTagsResult {
+  needsKey: boolean;
+  tags: BrowseTag[];
+  error: string | null;
+  cached?: boolean;
 }
 
 /* ---------------------- 工坊更新同步进游戏（install sync） ---------------------- */

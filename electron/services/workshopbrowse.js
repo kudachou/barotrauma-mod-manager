@@ -27,23 +27,33 @@ const APPID = 602960;
 const ENDPOINT = 'https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/';
 /** 每页上限就是 100，写大了 Steam 也只给 100 */
 const MAX_PER_PAGE = 100;
+/** 标签筛选最多同时选几个（多个是 AND 关系，选太多容易筛到空） */
+const MAX_TAGS = 3;
 
 /**
  * 排序方式 → Steam 的 query_type。
- * 只放实测确认过的值，不猜。
+ *
+ * 这几个值是**把 0~24 全试一遍、按返回结果的排序方向反推出来的**（2026-09-16 实测）：
+ *   12 订阅降序            → LuaCsForBarotrauma 686,617 订阅排第一
+ *    0 评分/口碑（非简单数值排序）→ 也是 LuaCs 第一，但第二三名和订阅榜不同
+ *    3 趋势（偏最近活跃）
+ *   21 **更新时间降序**     → 这个才是"最近更新"，一开始漏了它
+ *    1 创建时间降序        → "最新发布"
+ * 其余值要么没数据（2/8/15/16/20 total=0），要么只是上面某个的别名。
  */
 const SORTS = {
-  /** 订阅数最多（最"热门"） */
   popular: 12,
-  /** 趋势（偏最近上传/活跃） */
+  top: 0,
   trend: 3,
-  /** 最新发布 */
+  updated: 21,
   newest: 1
 };
 
 const SORT_LABELS = {
-  popular: '最热门（按订阅数）',
+  popular: '最热门',
+  top: '口碑最好',
   trend: '趋势',
+  updated: '最近更新',
   newest: '最新发布'
 };
 
@@ -54,10 +64,29 @@ let lastAt = 0;
 const MIN_GAP_MS = 400;
 
 /**
+ * 真正发请求：限速 + 短超时 + 一次重试。
+ * 这是交互式页面：宁可早点失败让用户点「重试」，也别让人对着转圈等一分钟。
+ */
+async function defaultGetJson(url) {
+  const gap = Date.now() - lastAt;
+  if (gap < MIN_GAP_MS) await sleep(MIN_GAP_MS - gap);
+  lastAt = Date.now();
+  const res = await request(url, {
+    headers: { Accept: 'application/json' },
+    timeoutMs: 8000,
+    retries: 1
+  });
+  return JSON.parse(res.buf.toString('utf8'));
+}
+
+/**
  * 组装 QueryFiles 的 URL。单独拆出来是为了能在自检里断言参数（不联网）。
  */
 function buildQueryUrl(params, key) {
-  const sort = SORTS[params && params.sort] ? params.sort : 'popular';
+  // 注意别用 SORTS[x] 的真假来判有效 —— 「口碑最好」的 query_type 就是 0，是 falsy，
+  // 那样写会把它当成无效值悄悄退回「最热门」。
+  const wanted = params && params.sort;
+  const sort = Object.prototype.hasOwnProperty.call(SORTS, String(wanted)) ? String(wanted) : 'popular';
   const search = String((params && params.search) || '').trim();
   const page = Math.max(1, Math.floor(Number((params && params.page) || 1)) || 1);
   const perRaw = Math.floor(Number((params && params.numPerPage) || 24)) || 24;
@@ -73,10 +102,25 @@ function buildQueryUrl(params, key) {
   if (search) q.set('search_text', search);
   // 不带这个就没有订阅数/收藏/标签/预览图
   q.set('return_metadata', 'true');
-  if (params && params.tag) q.set('requiredtags[0]', String(params.tag));
+  // 标签筛选必须是数组写法 requiredtags[0]=X（普通字符串会被 Steam 当没写）；
+  // 多个标签是 **AND** 关系，所以最多让选 3 个，免得筛到空
+  for (const [i, t] of normalizeTags(params && params.tags).entries()) {
+    q.set(`requiredtags[${i}]`, t);
+  }
   if (params && params.days) q.set('days', String(Math.max(1, Number(params.days) || 1)));
 
-  return { url: `${ENDPOINT}?${q.toString()}`, sort, search, page, numPerPage };
+  return { url: `${ENDPOINT}?${q.toString()}`, sort, search, page, numPerPage, tags: normalizeTags(params && params.tags) };
+}
+
+/** 标签统一成去重、去空、最多 3 个的数组 */
+function normalizeTags(tags) {
+  const list = Array.isArray(tags) ? tags : tags ? [tags] : [];
+  const out = [];
+  for (const t of list) {
+    const s = String(t == null ? '' : t).trim();
+    if (s && !out.includes(s) && out.length < MAX_TAGS) out.push(s);
+  }
+  return out;
 }
 
 /** 把接口返回的一坨字段收敛成界面要用的几个 */
@@ -115,20 +159,7 @@ async function browse(params, deps = {}) {
   }
 
   const built = buildQueryUrl(params, key);
-  const getJson =
-    deps.getJson ||
-    (async (url) => {
-      const gap = Date.now() - lastAt;
-      if (gap < MIN_GAP_MS) await sleep(MIN_GAP_MS - gap);
-      lastAt = Date.now();
-      const res = await request(url, {
-        headers: { Accept: 'application/json' },
-        // 这是交互式页面：宁可早点失败让用户点「重试」，也别让人对着转圈等一分钟
-        timeoutMs: 8000,
-        retries: 1
-      });
-      return JSON.parse(res.buf.toString('utf8'));
-    });
+  const getJson = deps.getJson || defaultGetJson;
 
   let json;
   try {
@@ -166,16 +197,85 @@ async function browse(params, deps = {}) {
     numPerPage: built.numPerPage,
     sort: built.sort,
     search: built.search,
+    tags: built.tags,
     items: list.map(normalizeItem).filter((x) => x.id)
   };
 }
 
+/* ------------------------------ 分类标签 ------------------------------ */
+
+/*
+ * 工坊上到底有哪些分类标签？**不硬编码**：直接抓几页结果把标签统计出来。
+ * 好处是以后 Steam 那边加/改标签，这里自动跟上；代价是每次要 3 个请求（缓存 6 小时）。
+ * 实测（2026-09-16）统计出 23 个：Item / Submarine / Art / Total conversion / Item assembly /
+ * Mission / Environment / Monster / Event set / Client-side / Equipment / QOL / Server-side /
+ * Weapons / Gameplay mechanics / Medical / Language / Wreck / Game mode / Outpost /
+ * Beacon station / Library / Ruin。
+ */
+const TAGS_TTL_MS = 6 * 60 * 60 * 1000;
+const TAG_SCAN_SORTS = [12, 3, 1]; // 订阅榜 + 趋势 + 最新，覆盖面比只扫一个榜大
+const TAG_SCAN_PER_PAGE = 100;
+
+let tagCache = { at: 0, key: '', tags: [] };
+
+async function browseTags(deps = {}) {
+  const key = String((deps && deps.key) || '').trim();
+  if (!key) return { needsKey: true, tags: [], error: null };
+
+  const now = Date.now();
+  if (deps.getJson === undefined && tagCache.tags.length && now - tagCache.at < TAGS_TTL_MS) {
+    return { needsKey: false, tags: tagCache.tags, error: null, cached: true };
+  }
+
+  const getJson = deps.getJson || defaultGetJson;
+  const counts = new Map();
+  try {
+    for (const t of TAG_SCAN_SORTS) {
+      const built = buildQueryUrl({ sort: byQueryType(t), page: 1, numPerPage: TAG_SCAN_PER_PAGE }, key);
+      const json = await getJson(built.url);
+      const list = ((json && json.response) || {}).publishedfiledetails || [];
+      for (const d of list) {
+        for (const tag of d.tags || []) {
+          const name = String((tag && tag.tag) || '').trim();
+          if (name) counts.set(name, (counts.get(name) || 0) + 1);
+        }
+      }
+    }
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    if (tagCache.tags.length) return { needsKey: false, tags: tagCache.tags, error: null, cached: true };
+    return {
+      needsKey: false,
+      tags: [],
+      error: /请求超时|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND/i.test(msg)
+        ? '连不上 Steam —— 确认加速器/代理开着'
+        : `读取分类失败：${msg}`
+    };
+  }
+
+  const tags = [...counts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+
+  if (tags.length) tagCache = { at: now, key, tags };
+  return { needsKey: false, tags, error: null };
+}
+
+/** 由 query_type 反查排序名（扫描标签时用） */
+function byQueryType(t) {
+  for (const [name, v] of Object.entries(SORTS)) if (v === t) return name;
+  return 'popular';
+}
+
 module.exports = {
   browse,
+  browseTags,
   buildQueryUrl,
   normalizeItem,
+  normalizeTags,
   SORTS,
   SORT_LABELS,
   MAX_PER_PAGE,
+  MAX_TAGS,
   APPID
 };

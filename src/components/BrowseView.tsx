@@ -15,12 +15,16 @@ import { IconAlert, IconExternal, IconRefresh, IconSearch } from './Icons';
  */
 
 const SORTS: { key: WorkshopSort; label: string }[] = [
-  { key: 'popular', label: '最热门（订阅数）' },
+  { key: 'popular', label: '最热门' },
   { key: 'trend', label: '趋势' },
-  { key: 'newest', label: '最新发布' }
+  { key: 'updated', label: '最近更新' },
+  { key: 'newest', label: '最新发布' },
+  { key: 'top', label: '口碑最好' }
 ];
 
 const PER_PAGE = 24;
+/** 分类标签最多同时选几个（多个是 AND 关系，选太多容易筛到空） */
+const MAX_TAGS = 3;
 
 function humanCount(n: number): string {
   if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
@@ -47,6 +51,9 @@ export default function BrowseView({
   const [sort, setSort] = useState<WorkshopSort>('popular');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
+  const [tagsError, setTagsError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,14 +61,15 @@ export default function BrowseView({
   const seq = useRef(0);
 
   const load = useCallback(
-    async (opts?: { sort?: WorkshopSort; search?: string; page?: number }) => {
+    async (opts?: { sort?: WorkshopSort; search?: string; page?: number; tags?: string[] }) => {
       const s = opts?.sort ?? sort;
       const q = opts?.search ?? search;
       const p = opts?.page ?? page;
+      const t = opts?.tags ?? selectedTags;
       const my = ++seq.current;
       setLoading(true);
       try {
-        const r = await api.browseWorkshop({ sort: s, search: q, page: p, numPerPage: PER_PAGE });
+        const r = await api.browseWorkshop({ sort: s, search: q, page: p, numPerPage: PER_PAGE, tags: t });
         if (my !== seq.current) return; // 只认最后一次请求，避免翻页时旧结果盖上新结果
         setResult(r);
       } catch (e: any) {
@@ -78,11 +86,28 @@ export default function BrowseView({
         if (my === seq.current) setLoading(false);
       }
     },
-    [sort, search, page]
+    [sort, search, page, selectedTags]
   );
+
+  /** 分类标签：从 Steam 结果里统计出来的，不硬编码（缓存 6 小时） */
+  const loadTags = useCallback(async () => {
+    try {
+      const r = await api.browseWorkshopTags();
+      if (r && r.needsKey) {
+        setTags([]);
+        setTagsError(null);
+        return;
+      }
+      setTags((r && r.tags) || []);
+      setTagsError((r && r.error) || null);
+    } catch (e: any) {
+      setTagsError(String(e?.message || e));
+    }
+  }, []);
 
   useEffect(() => {
     void load();
+    void loadTags();
     // 只在首次进入时拉一次；后续都由交互显式触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -104,6 +129,26 @@ export default function BrowseView({
     setSort(s);
     setPage(1);
     void load({ sort: s, page: 1 });
+  }
+
+  /** 点分类：选中/取消，多个之间是 AND（跟 Steam 工坊一致） */
+  function toggleTag(tag: string) {
+    const has = selectedTags.includes(tag);
+    let next: string[];
+    if (has) next = selectedTags.filter((x) => x !== tag);
+    else if (selectedTags.length >= MAX_TAGS) {
+      onToast('warn', `最多同时选 ${MAX_TAGS} 个分类`, '多个分类是「同时满足」的关系，选太多会筛不到东西');
+      return;
+    } else next = [...selectedTags, tag];
+    setSelectedTags(next);
+    setPage(1);
+    void load({ tags: next, page: 1 });
+  }
+
+  function clearTags() {
+    setSelectedTags([]);
+    setPage(1);
+    void load({ tags: [], page: 1 });
   }
 
   function goPage(p: number) {
@@ -210,6 +255,35 @@ export default function BrowseView({
           </button>
         </div>
       )}
+
+      {tags.length > 0 && (
+        <div className="chips-row browse-tags">
+          <div
+            className={`tag-toggle ${selectedTags.length === 0 ? 'on' : ''}`}
+            onClick={clearTags}
+            title="不按分类筛"
+          >
+            全部分类
+          </div>
+          {tags.map((t) => (
+            <div
+              key={t.tag}
+              className={`tag-toggle ${selectedTags.includes(t.tag) ? 'on' : ''}`}
+              onClick={() => toggleTag(t.tag)}
+              title={`${t.count} 个热门条目带这个分类`}
+            >
+              {t.tag}
+              <span className="browse-tag-count">{t.count}</span>
+            </div>
+          ))}
+          {selectedTags.length > 0 && (
+            <span className="browse-note" style={{ margin: 'auto 0 auto 6px' }}>
+              已选 {selectedTags.length}/{MAX_TAGS}（同时满足）
+            </span>
+          )}
+        </div>
+      )}
+      {tagsError && !tags.length && <div className="browse-note">分类没读到：{tagsError}</div>}
 
       {result?.needsKey ? (
         <div className="empty" style={{ padding: 40 }}>

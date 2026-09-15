@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // 浏览创意工坊（要 Steam Web API Key）
   browseWorkshop: (params) => invoke('workshop:browse', params),
+  browseWorkshopTags: () => invoke('workshop:browseTags'),
   // 在 Steam 客户端里打开某个工坊条目（网页版用 openExternal 保底）
   openWorkshopInSteam: (id) => invoke('shell:openWorkshopInSteam', id)
 });

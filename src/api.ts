@@ -24,6 +24,7 @@ import type {
   InstallSyncResult,
   BrowseItem,
   BrowseResult,
+  BrowseTagsResult,
   WorkshopSort
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
@@ -518,6 +519,7 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   browseWorkshop: async (params?: any): Promise<BrowseResult> => {
     const sort: WorkshopSort = (params?.sort as WorkshopSort) || 'popular';
     const search = String(params?.search || '').trim();
+    const tags: string[] = Array.isArray(params?.tags) ? params.tags : [];
     const page = Number(params?.page || 1);
     const per = 24;
     const base: BrowseItem[] = state.mods
@@ -532,24 +534,57 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
         views: 554390 - i * 8211,
         timeUpdated: Math.floor(Date.now() / 1000) - i * 86400,
         fileSize: 1024 * 1024 * (12 + i * 7),
-        tags: ['Total conversion', 'Gameplay mechanics', 'QOL'].slice(0, (i % 3) + 1),
+        tags: ['Item', 'Submarine', 'Art', 'Total conversion', 'QOL'].slice(0, (i % 4) + 1),
         pageUrl: `https://steamcommunity.com/sharedfiles/filedetails/?id=${m.id}`
       }));
-    const filtered = search
-      ? base.filter((x) => x.title.toLowerCase().includes(search.toLowerCase()))
-      : base;
+    const filtered = base.filter((x) => {
+      if (search && !x.title.toLowerCase().includes(search.toLowerCase())) return false;
+      // 多个分类是 AND（跟 Steam 工坊一致）
+      if (tags.length && !tags.every((t) => x.tags.includes(t))) return false;
+      return true;
+    });
     const start = (Math.max(1, page) - 1) * per;
     return {
       needsKey: false,
       error: null,
-      total: 82890,
+      total: tags.length ? filtered.length : 82890,
       page: Math.max(1, page),
       numPerPage: per,
       sort,
       search,
+      tags,
       items: filtered.slice(start, start + per)
     };
   },
+  browseWorkshopTags: async (): Promise<BrowseTagsResult> => ({
+    needsKey: false,
+    error: null,
+    tags: [
+      { tag: 'Item', count: 68 },
+      { tag: 'Submarine', count: 38 },
+      { tag: 'Art', count: 36 },
+      { tag: 'Total conversion', count: 30 },
+      { tag: 'Item assembly', count: 30 },
+      { tag: 'Mission', count: 28 },
+      { tag: 'Environment', count: 28 },
+      { tag: 'Monster', count: 27 },
+      { tag: 'Event set', count: 26 },
+      { tag: 'Client-side', count: 24 },
+      { tag: 'Equipment', count: 24 },
+      { tag: 'QOL', count: 23 },
+      { tag: 'Server-side', count: 18 },
+      { tag: 'Weapons', count: 18 },
+      { tag: 'Gameplay mechanics', count: 15 },
+      { tag: 'Medical', count: 10 },
+      { tag: 'Language', count: 10 },
+      { tag: 'Wreck', count: 5 },
+      { tag: 'Game mode', count: 5 },
+      { tag: 'Outpost', count: 4 },
+      { tag: 'Beacon station', count: 4 },
+      { tag: 'Library', count: 3 },
+      { tag: 'Ruin', count: 1 }
+    ]
+  }),
 
   // 预览模式：给一段示例描述，用来展示工坊描述的排版效果
   getWorkshopDetails: async (id: string): Promise<WorkshopDetails | null> => {
@@ -720,7 +755,9 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   openModFolder: async (_p?: string): Promise<void> => {},
   openExternal: async (_url?: string): Promise<void> => {},
   getWorkshopPage: async (_id?: string): Promise<void> => {},
-  openWorkshopInSteam: async (id?: string): Promise<{ ok: boolean; via: string; url: string }> => ({
+  openWorkshopInSteam: async (
+    id?: string
+  ): Promise<{ ok: boolean; via: string; url: string; error?: string }> => ({
     ok: true,
     via: 'preview',
     url: `steam://url/CommunityFilePage/${id || ''}`

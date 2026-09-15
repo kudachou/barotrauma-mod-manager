@@ -23,7 +23,7 @@ const {
 const { applyToGame, readAppliedPackages } = require('./config');
 const { listSaves } = require('./saves');
 const { installStatus, pendingSyncOf, planInstallSync, runInstallSync } = require('./installsync');
-const { browse: browseWorkshop } = require('./workshopbrowse');
+const { browse: browseWorkshop, browseTags: browseWorkshopTags } = require('./workshopbrowse');
 const { openWorkshopInSteam } = require('./openinsteam');
 const { registerUpdaterIpc } = require('./updater');
 const { copyDir } = require('./fsutil');
@@ -734,6 +734,11 @@ function registerIpc() {
 
   ipcMain.handle('workshop:browse', (_e, params) =>
     browseWorkshop(params || {}, { key: getApiKey(userDataDir()) })
+  );
+
+  /** 分类标签：从接口结果里统计出来，不硬编码 */
+  ipcMain.handle('workshop:browseTags', () =>
+    browseWorkshopTags({ key: getApiKey(userDataDir()) })
   );
 }
 

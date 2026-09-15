@@ -1115,11 +1115,52 @@ try {
     ok(/numperpage=100/.test(u3.url), `每页上限压到 100（实际 ${u3.numPerPage}）`);
     ok(wb.buildQueryUrl({ page: 0 }, 'K').page === 1, '页码非法时回到第 1 页');
 
-    const u4 = wb.buildQueryUrl({ tag: 'Total conversion' }, 'K');
+    const u4 = wb.buildQueryUrl({ tags: ['Total conversion'] }, 'K');
     ok(
       /requiredtags%5B0%5D=Total\+conversion|requiredtags\[0\]=Total/.test(u4.url),
       '标签要用 requiredtags[0] 数组写法（普通字符串会被 Steam 忽略）'
     );
+
+    // 排序：实测确认过的 5 种
+    ok(/query_type=21/.test(wb.buildQueryUrl({ sort: 'updated' }, 'K').url), '「最近更新」→ query_type=21');
+    ok(/query_type=0/.test(wb.buildQueryUrl({ sort: 'top' }, 'K').url), '「口碑最好」→ query_type=0');
+
+    // 多分类 = AND（对齐 Steam 工坊），最多 3 个
+    const u5 = wb.buildQueryUrl({ tags: ['Item', 'QOL'] }, 'K');
+    ok(
+      /requiredtags%5B0%5D=Item/.test(u5.url) && /requiredtags%5B1%5D=QOL/.test(u5.url),
+      '多个分类按 requiredtags[0]/[1] 传（Steam 里是「同时满足」）'
+    );
+    const u6 = wb.buildQueryUrl({ tags: ['A', 'A', ' B ', '', 'C', 'D', 'E'] }, 'K');
+    ok(u6.tags.join(',') === 'A,B,C', `分类去重去空、最多 3 个（实际 ${u6.tags.join(',')}）`);
+    ok(wb.normalizeTags('单个字符串').join(',') === '单个字符串', '单个分类字符串也能接受');
+
+    // 分类统计：从接口结果里统计出来（不硬编码），并按出现次数排序
+    let calls = 0;
+    const tagRes = await wb.browseTags({
+      key: 'K',
+      getJson: async () => {
+        calls++;
+        return {
+          response: {
+            publishedfiledetails: [
+              { publishedfileid: '1', tags: [{ tag: 'Item' }, { tag: 'QOL' }] },
+              { publishedfileid: '2', tags: [{ tag: 'Item' }] },
+              { publishedfileid: '3', tags: [{ tag: '' }, null] }
+            ]
+          }
+        };
+      }
+    });
+    ok(calls === 3, `统计分类时扫 3 个榜单（实际 ${calls} 次请求）`);
+    ok(
+      tagRes.tags.length === 2 && tagRes.tags[0].tag === 'Item' && tagRes.tags[0].count === 6,
+      `按出现次数排序、忽略空标签（Item 出现 ${tagRes.tags[0] && tagRes.tags[0].count} 次：3 个榜单各 2 次）`
+    );
+    ok(tagRes.tags[1].tag === 'QOL' && tagRes.tags[1].count === 3, 'QOL 出现 3 次');
+
+    const noKeyTags = await wb.browseTags({ key: '' });
+    ok(noKeyTags.needsKey === true && noKeyTags.tags.length === 0, '没 key 时分类也返回 needsKey');
 
     // 归一化：接口字段又长又乱，界面只认这几个
     const it = wb.normalizeItem({

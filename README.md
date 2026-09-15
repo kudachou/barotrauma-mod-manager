@@ -49,6 +49,18 @@
   - 与游戏内更新等价，但**不会让 Steam 把整包重下一遍**（少下 59 MB 那种）
   - 已下架的 mod 不算「待同步」（游戏本来就不会装它们），会单列出来指到「备份已下架的」
 
+**浏览工坊（beta）**
+- 在管理器里直接搜索/排序创意工坊：**关键词搜索**、5 种排序（最热门 / 趋势 / 最近更新 /
+  最新发布 / 口碑最好）、**23 个分类标签**（可多选，多个是「同时满足」）、翻页
+  - 数据来自官方 `IPublishedFileService/QueryFiles`，所以**要填 Steam Web API Key**，
+    而且**必须能访问 Steam**（国内一般需要加速器，否则提示「连不上 Steam」）
+  - 分类标签**不是硬编码**：抓 3 个榜单各 100 条统计出来的（缓存 6 小时），Steam 那边改标签能自动跟上
+- 卡片上标出「已有」（本地库里已经有这个条目），还能看订阅数/收藏数/更新日期/分类
+- **下载交给 Steam**：点「在 Steam 里打开」→ 在 Steam 客户端里点「订阅」→ 回到管理器点顶栏
+  「同步到游戏」把它装进游戏。旁边有「网页版」按钮兜底
+  - 实测：`steam://url/CommunityFilePage/<id>` 有效，但**走 ShellExecute 不可靠**，
+    所以是直接找到 `steam.exe` 调用它（找不到才退回系统处理，再不行用网页版）
+
 **存档**
 - **看每个存档当时启用了哪些 mod**：直接解析 `.save`（gzip 压缩的 XML）里的
   `selectedcontentpackagenames`，按**加载顺序**列出，并标出哪些 mod 现在游戏里已经没有了
@@ -416,6 +428,8 @@ electron/            主进程
     config.js        应用到 config_player.xml
     saves.js         解析 .save，读出「这个存档当时启用了哪些 mod」
     installsync.js   把 Steam 已下载、游戏还没装的工坊更新同步进 Installed
+    workshopbrowse.js 浏览创意工坊（QueryFiles：搜索/排序/分类统计）
+    openinsteam.js    在 Steam 客户端里打开工坊页面（直接调 steam.exe）
     steam.js         工坊封面（公开接口 + 缓存）
     categories.js    分类规则与标签持久化
     relations.js     mod 之间的关联（前置需求）
@@ -441,6 +455,7 @@ pnpm exec electron scripts/test-desc-scroll.cjs  # 工坊描述能否真的滚�
 pnpm exec electron scripts/test-apply-ui.cjs     # 「应用到游戏」点一次界面就更新（隔离临时目录）
 pnpm exec electron scripts/test-saves-ui.cjs     # 存档页：解析、对应合集、两个动作（隔离临时存档）
 pnpm exec electron scripts/test-sync-ui.cjs      # 工坊更新同步进游戏（隔离临时目录）
+pnpm exec electron scripts/test-browse-ui.cjs    # 浏览工坊：没 key / key 失效时的提示（隔离 userData）
 ```
 
 `test-apply-ui.cjs` 是为了用户反馈的那个坑留下的：**点一次「应用到游戏」，config 确实写进去了，
