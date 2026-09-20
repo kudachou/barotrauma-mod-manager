@@ -27,6 +27,12 @@ const TMP = path.join(__dirname, '..', 'tmp-test');
 fs.rmSync(TMP, { recursive: true, force: true });
 fs.mkdirSync(TMP, { recursive: true });
 
+/*
+ * 主体放在 async 函数里：长任务（runWorkshopBackup / runInstallSync）现在是 async 的
+ * ——它们要 await 让出事件循环，取消按钮才可能生效，所以调用点也必须 await。
+ */
+async function main() {
+
 function writeMod(root, folder, filelistXml) {
   const dir = path.join(root, folder);
   fs.mkdirSync(dir, { recursive: true });
@@ -493,7 +499,7 @@ try {
   ok(plan.newCount === 1, '其余算作「新建」');
   ok(plan.items.every((i) => i.folder && i.source), '每项都有目标文件夹和来源目录');
 
-  const result = bk.runWorkshopBackup(bkSettings, plan);
+  const result = await bk.runWorkshopBackup(bkSettings, plan);
   ok(result.done === 2 && result.errors.length === 0, `复制完成：${result.done} 个，0 错误`);
   ok(
     fs.existsSync(path.join(bkSettings.localModsDir, '我的mod', 'filelist.xml')),
@@ -1023,7 +1029,7 @@ try {
   );
   ok(dlIds.includes('91003'), '只是没装过、并没有下架 → 照常算待同步');
 
-  const syRun = isync.runInstallSync(sySettings, syPlan.items);
+  const syRun = await isync.runInstallSync(sySettings, syPlan.items);
   ok(syRun.failed.length === 0, `没有失败项${syRun.failed.length ? '：' + JSON.stringify(syRun.failed) : ''}`);
   ok(syRun.synced.length === 2, '同步了 2 个');
 
@@ -1061,13 +1067,13 @@ try {
   // 失败项要如实报，并且不能破坏已有的安装
   const badSettings = { ...sySettings, workshopModsDir: path.join(syRoot, 'empty-ws') };
   fs.mkdirSync(path.join(badSettings.workshopModsDir, '90001'), { recursive: true });
-  const badRun = isync.runInstallSync(badSettings, [{ id: '90001', name: '残缺', targetTime: 1 }]);
+  const badRun = await isync.runInstallSync(badSettings, [{ id: '90001', name: '残缺', targetTime: 1 }]);
   ok(badRun.failed.length === 1, 'Steam 那份不完整时记为失败');
   ok(!fs.existsSync(path.join(syInst, '90001')), '失败时不会留下半成品目录');
 
   let badId = false;
   try {
-    isync.syncOne(sySettings, { id: '../跑到外面', name: 'x', targetTime: 1 });
+    await isync.syncOne(sySettings, { id: '../跑到外面', name: 'x', targetTime: 1 });
   } catch {
     badId = true;
   }
@@ -1092,9 +1098,10 @@ try {
   console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
   failures++;
 }
+}
 
 /* -------- 14. 浏览创意工坊（QueryFiles）：只测参数组装与归一化，不联网 -------- */
-(async () => {
+async function tail() {
   try {
     console.log('\n[14] 浏览创意工坊（参数与归一化）');
     const wb = require('../electron/services/workshopbrowse');
@@ -1469,4 +1476,10 @@ try {
   fs.rmSync(TMP, { recursive: true, force: true });
   console.log(failures ? `\n=== ${failures} 项失败 ===` : '\n=== 全部通过 ===');
   process.exit(failures ? 1 : 0);
+}
+
+/* -------- 入口：先跑同步主体，再跑异步的 14~17 节 -------- */
+(async () => {
+  await main();
+  await tail();
 })();

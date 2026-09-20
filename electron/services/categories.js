@@ -62,14 +62,17 @@ function load() {
   return cache;
 }
 
+/**
+ * 写到磁盘并返回写下去的那份数据。
+ *
+ * 这里**故意不再吞异常**：以前 catch 掉之后照样返回成功，界面就显示"已保存"，
+ * 重启后改动没了（用户反馈过的"保存了却没生效"）。现在让错误冒到 IPC 层，
+ * 界面能弹出真正的失败提示，而不是骗用户。
+ */
 function persist() {
   const d = load();
-  try {
-    fs.mkdirSync(path.dirname(file()), { recursive: true });
-    fs.writeFileSync(file(), JSON.stringify(d, null, 2), 'utf8');
-  } catch {
-    /* 忽略 */
-  }
+  fs.mkdirSync(path.dirname(file()), { recursive: true });
+  fs.writeFileSync(file(), JSON.stringify(d, null, 2), 'utf8');
   return d;
 }
 

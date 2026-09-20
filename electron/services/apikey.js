@@ -26,15 +26,15 @@ function getApiKey(dir) {
   }
 }
 
+/**
+ * 写盘并返回写下去的 key。
+ * 不吞异常：以前写失败也返回成功，用户以为 Key 存住了，重启后又变回没 Key 的状态。
+ */
 function setApiKey(dir, key) {
   const k = String(key == null ? '' : key).trim();
   const f = file(dir);
-  try {
-    fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, JSON.stringify({ key: k }, null, 2), 'utf8');
-  } catch {
-    /* 写不进去也不影响返回值 */
-  }
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ key: k }, null, 2), 'utf8');
   return k;
 }
 

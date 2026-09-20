@@ -429,14 +429,14 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   },
 
   fetchPreviews: async (_ids: string[]): Promise<void> => {},
-  onPreviewReady: (_cb: (p: { id: string; localPath: string | null }) => void): void => {},
+  onPreviewReady: (_cb: (p: { id: string; localPath: string | null }) => void): (() => void) => () => {},
 
   // 预览模式下没有安装包，更新功能不可用
   updaterStatus: async (): Promise<UpdateState> => mockUpdateState(),
   updaterCheck: async (): Promise<UpdateState> => mockUpdateState(),
   updaterDownload: async (): Promise<UpdateState> => mockUpdateState(),
   updaterInstall: async (): Promise<boolean> => false,
-  onUpdaterEvent: (_cb: (s: UpdateState) => void): void => {},
+  onUpdaterEvent: (_cb: (s: UpdateState) => void): (() => void) => () => {},
 
   // 预览模式下只是把示例数据装出来给界面看
   launchGame: async (): Promise<{ ok: boolean; via: string }> => ({ ok: true, via: 'preview' }),
@@ -547,7 +547,7 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
     };
   },
   cancelWorkshopBackup: async (): Promise<boolean> => true,
-  onBackupProgress: (_cb: (p: BackupProgress) => void): void => {},
+  onBackupProgress: (_cb: (p: BackupProgress) => void): (() => void) => () => {},
 
   // 预览模式：假装有一个工坊 mod 的更新躺在 Steam 里还没装进游戏
   planInstallSync: async (): Promise<InstallSyncPlan> => {

@@ -33,7 +33,7 @@ export default function BackupModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.onBackupProgress((p: BackupProgress) => setProgress(p));
+    const off = api.onBackupProgress?.((p: BackupProgress) => setProgress(p));
     void (async () => {
       try {
         const p = await api.planWorkshopBackup(scope);
@@ -44,6 +44,10 @@ export default function BackupModal({
         setPhase('done');
       }
     })();
+    // 返回退订：scope 变化或弹窗关闭时把上一个监听摘掉（不能返回上面那个 async 的返回值）
+    return () => {
+      off?.();
+    };
   }, [scope]);
 
   async function start() {

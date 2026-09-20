@@ -100,6 +100,22 @@ function rmrf(p) {
   }
 }
 
+/**
+ * 严格版删除：目录**真的没了**才返回，否则抛错。
+ *
+ * `rmrf` 吞掉异常是为了"顺手清理"（临时的、可失败的地方），但凡后面紧跟着
+ * 「复制覆盖」的删除都不能用它 —— 删失败了却当成功，接着就会在半个旧目录上
+ * 覆盖出混合状态，回滚逻辑也永远不会被触发。ENOENT 仍然算成功。
+ */
+function rmrfStrict(p) {
+  try {
+    fs.rmSync(p, { recursive: true, force: false });
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return;
+    throw e;
+  }
+}
+
 function humanSize(bytes) {
   const n = Number(bytes) || 0;
   if (n < 1024) return `${n} B`;
@@ -108,4 +124,4 @@ function humanSize(bytes) {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-module.exports = { copyDir, dirStats, sanitizeName, uniqueName, stamp, parseStamp, rmrf, humanSize };
+module.exports = { copyDir, dirStats, sanitizeName, uniqueName, stamp, parseStamp, rmrf, rmrfStrict, humanSize };

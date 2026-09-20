@@ -16,6 +16,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parseModlistText, serializeModlist } = require('./modlists');
 const { fetchDetails } = require('./steam');
+const { ID_RE } = require('./openinsteam');
+
+/**
+ * 导入进来的工坊条目只保留纯数字 id。
+ *
+ * 合集文件是别人发过来的（聊天里贴的文本、下载的 xml/json），id 会被后续的
+ * 「应用到游戏」拼成文件路径，所以从**入口**就按纯数字过滤掉越界值。
+ * 纯文本分支本来就用 \d{5,20} 抓取，这里补齐 xml / json 两个分支。
+ */
+function numericWorkshopId(v) {
+  const s = String(v == null ? '' : v).trim();
+  return ID_RE.test(s) ? s : null;
+}
 
 const FORMAT = 'bmm-modlist';
 const FORMAT_VERSION = 1;
@@ -84,7 +97,17 @@ function parseShared(raw, fallbackName) {
   if (/<mods\b/i.test(text)) {
     const ml = parseModlistText(text, fallbackName);
     if (!ml.entries.length) throw new Error('这个合集文件里没有 mod 条目');
-    return { format: 'xml', name: ml.name, entries: ml.entries, note: null };
+    const entries = ml.entries
+      .map((e) => {
+        if (e.type === 'workshop') {
+          const id = numericWorkshopId(e.id);
+          return id ? { type: 'workshop', id, name: e.name || null } : null;
+        }
+        return e.type === 'local' && e.name ? { type: 'local', name: String(e.name) } : null;
+      })
+      .filter(Boolean);
+    if (!entries.length) throw new Error('这个合集文件里没有可用的 mod 条目');
+    return { format: 'xml', name: ml.name, entries, note: null };
   }
 
   // 2) 本管理器导出的 JSON
@@ -100,8 +123,8 @@ function parseShared(raw, fallbackName) {
     }
     const entries = j.entries
       .map((e) =>
-        e && e.type === 'workshop' && e.id
-          ? { type: 'workshop', id: String(e.id), name: e.name || null }
+        e && e.type === 'workshop' && e.id && ID_RE.test(String(e.id).trim())
+          ? { type: 'workshop', id: String(e.id).trim(), name: e.name || null }
           : e && e.type === 'local' && e.name
             ? { type: 'local', name: String(e.name) }
             : null

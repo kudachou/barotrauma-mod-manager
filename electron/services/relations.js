@@ -33,14 +33,15 @@ function load(dir) {
   }
 }
 
+/**
+ * 写盘并返回写下去的数据。
+ * 不吞异常：以前写失败也返回成功，界面显示保存好了、重启就没了（用户反馈过）。
+ * 现在让错误冒到 IPC 层，界面才能如实提示失败。
+ */
 function persist(dir, data) {
   const f = file(dir);
-  try {
-    fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, JSON.stringify(data, null, 2), 'utf8');
-  } catch {
-    /* 写盘失败不影响返回值 */
-  }
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify(data, null, 2), 'utf8');
   return data;
 }
 

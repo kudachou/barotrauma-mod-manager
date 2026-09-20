@@ -212,6 +212,12 @@ function fetchText(url, timeout = 20000) {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        /*
+         * 必须监听响应流自己的 error：连接中途断开时 res 只会 emit 'error'，
+         * 既不会 'end' 也不会触发 req 的 error —— 少了这一行，这个 Promise
+         * 永远不会落地，await 它的下架检查会一直挂在那里。
+         */
+        res.on('error', reject);
       }
     );
     req.on('error', reject);

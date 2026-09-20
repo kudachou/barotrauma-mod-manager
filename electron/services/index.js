@@ -24,7 +24,7 @@ const { applyToGame, readAppliedPackages } = require('./config');
 const { listSaves } = require('./saves');
 const { installStatus, pendingSyncOf, planInstallSync, runInstallSync } = require('./installsync');
 const { browse: browseWorkshop, browseTags: browseWorkshopTags } = require('./workshopbrowse');
-const { openWorkshopInSteam } = require('./openinsteam');
+const { openWorkshopInSteam, ID_RE, assertWorkshopId } = require('./openinsteam');
 const { getMedia: getWorkshopMedia } = require('./workshoppage');
 const { translateToChinese } = require('./translate');
 const {
@@ -60,6 +60,7 @@ const {
   deleteSnapshot,
   localModFootprint,
   deleteLocalModFiles,
+  assertModDir,
   planWorkshopBackup,
   runWorkshopBackup
 } = require('./backup');
@@ -85,6 +86,27 @@ const previewQueue = createQueue(5, 150);
 const previewInflight = new Set();
 
 const COVER_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'];
+
+/**
+ * ---- 渲染层参数的边界 ----
+ *
+ * 下面这些 handler 的参数全部来自渲染层。渲染层本身是可信的，但它是**唯一**能让外部内容
+ * （工坊描述、导入的合集文件、mod 里的 XML）影响到主进程的地方，所以凡是"参数会被拼进
+ * 文件路径"的 handler，边界校验必须落在主进程这一侧 —— preload 只是转发，拦不住任何东西。
+ */
+
+/** 参数必须是纯数字工坊 id，并返回规范化后的字符串（拼路径/拼 URL 前先过这里） */
+function numId(v, what) {
+  return assertWorkshopId(v, what);
+}
+
+/** 解析成绝对路径，并确认它落在 root 之内（不是 root 本身） */
+function insideDir(root, unsafe, what) {
+  const base = path.resolve(String(root || '.'));
+  const p = path.resolve(base, String(unsafe == null ? '' : unsafe));
+  if (p === base || !p.startsWith(base + path.sep)) throw new Error(`非法的${what}`);
+  return p;
+}
 
 function safeKey(key) {
   return String(key || '').replace(/[\\/:*?"<>|]/g, '_');
@@ -490,7 +512,9 @@ function registerIpc() {
   ipcMain.handle('previews:fetch', async (event, ids) => {
     const dir = path.join(userDataDir(), 'previews');
     const sender = event.sender;
-    const list = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+    // id 会拼成 <userData>\previews\<id>.<ext> / <id>.miss，非数字直接丢掉
+    // （不能抛错：ids 是一整批，一个坏值不该让整批封面失败）
+    const list = (Array.isArray(ids) ? ids : []).map(String).filter((x) => ID_RE.test(x));
 
     const need = [];
     let cachedCount = 0;
@@ -540,7 +564,7 @@ function registerIpc() {
   /* ------------------------------ 工坊详情 ------------------------------ */
 
   ipcMain.handle('workshop:details', (_e, id, force) =>
-    getWorkshopDetails(id, path.join(userDataDir(), 'workshop'), {
+    getWorkshopDetails(numId(id), path.join(userDataDir(), 'workshop'), {
       force: !!force,
       // 配了 key 就拿**本地化（中文）**描述 —— 老接口永远只给英文，这就是
       // 「管理器显示英文、Steam 显示中文」的原因
@@ -620,8 +644,9 @@ function registerIpc() {
   /** 用创意工坊版覆盖本地版：先把本地状态存成快照（可回滚），再复制工坊版进来 */
   ipcMain.handle('compare:overwrite', (_e, localId, workshopId) => {
     const s = getSettings();
-    const localDir = path.join(s.localModsDir, localId);
-    const srcDir = path.join(s.workshopModsDir, workshopId);
+    // 这两个参数会被拼成路径，紧接着 rmSync 递归删除 —— 边界必须在这里卡死
+    const localDir = insideDir(s.localModsDir, localId, '本地 mod 名称');
+    const srcDir = insideDir(s.workshopModsDir, numId(workshopId, '工坊 id'), '工坊 mod 名称');
     if (!fs.existsSync(localDir)) throw new Error(`本地 mod 文件夹不存在：${localDir}`);
     if (!fs.existsSync(srcDir)) throw new Error(`创意工坊 mod 文件夹不存在：${srcDir}`);
 
@@ -644,13 +669,13 @@ function registerIpc() {
   /** 把创意工坊 mod 复制成新的本地 mod */
   ipcMain.handle('compare:copyToLocal', (_e, workshopId, newName) => {
     const s = getSettings();
-    const srcDir = path.join(s.workshopModsDir, workshopId);
+    const srcDir = insideDir(s.workshopModsDir, numId(workshopId, '工坊 id'), '工坊 mod 名称');
     const name = String(newName || '').trim();
     if (!name) throw new Error('请填写新文件夹名称');
     if (/[\\/:*?"<>|]/.test(name)) throw new Error('名称不能包含 \\ / : * ? " < > |');
     if (!fs.existsSync(srcDir)) throw new Error(`创意工坊 mod 文件夹不存在：${srcDir}`);
 
-    const destDir = path.join(s.localModsDir, name);
+    const destDir = insideDir(s.localModsDir, name, '新文件夹名称');
     if (fs.existsSync(destDir)) throw new Error(`本地已存在同名文件夹：${destDir}`);
 
     copyDir(srcDir, destDir);
@@ -692,6 +717,7 @@ function registerIpc() {
 
   ipcMain.handle('snapshot:list', (_e, modName) => {
     const s = getSettings();
+    assertModDir(s, modName);
     return { items: listSnapshots(s, modName), summary: snapshotSummary(s, modName) };
   });
 
@@ -712,9 +738,11 @@ function registerIpc() {
 
   /* ---------------------------- 删除本地 mod ---------------------------- */
 
-  ipcMain.handle('localmod:footprint', (_e, modName) =>
-    localModFootprint(getSettings(), String(modName || ''))
-  );
+  ipcMain.handle('localmod:footprint', (_e, modName) => {
+    const s = getSettings();
+    assertModDir(s, modName);
+    return localModFootprint(s, modName);
+  });
 
   /** 一键删除本地 mod：mod 文件夹 + 它的历史快照（可选同时从合集里摘掉引用） */
   ipcMain.handle('localmod:delete', (_e, modName, removeFromModlists) => {
@@ -762,7 +790,7 @@ function registerIpc() {
   /** 只算不复制：给出数量与总体积，让用户决定要不要执行 */
   ipcMain.handle('backup:plan', (event, scope) => measure(event.sender, scope));
 
-  ipcMain.handle('backup:start', (event, scope) => {
+  ipcMain.handle('backup:start', async (event, scope) => {
     if (backupRunning) throw new Error('已有备份任务在进行中');
     const s = getSettings();
     const sender = event.sender;
@@ -771,7 +799,9 @@ function registerIpc() {
     backupCancelled = false;
     try {
       const plan = measure(sender, scope);
-      return runWorkshopBackup(s, plan, {
+      // 必须 await：否则 finally 会在复制开始前就把 running 标志清掉，
+      // 界面又能发起第二个任务，同时两个任务抢同一个目录。
+      return await runWorkshopBackup(s, plan, {
         onProgress: (p) => send(sender, 'backup:progress', p),
         isCancelled: () => backupCancelled
       });
@@ -799,7 +829,7 @@ function registerIpc() {
     })
   );
 
-  ipcMain.handle('installsync:start', (event) => {
+  ipcMain.handle('installsync:start', async (event) => {
     if (syncRunning) throw new Error('已有同步任务在进行中');
     const s = getSettings();
     const sender = event.sender;
@@ -807,7 +837,8 @@ function registerIpc() {
     syncCancelled = false;
     try {
       const plan = planInstallSync(s, { checks: readChecks(userDataDir()) });
-      return runInstallSync(s, plan.items, {
+      // 同 backup:start：不 await 的话 finally 会提前清标志，界面能并发发起第二次同步
+      return await runInstallSync(s, plan.items, {
         onProgress: (p) => send(sender, 'installsync:progress', p),
         isCancelled: () => syncCancelled
       });
@@ -823,9 +854,23 @@ function registerIpc() {
 
   /* -------------------------------- 杂项 -------------------------------- */
 
+  /*
+   * 只允许"打开目录"。
+   * shell.openPath 在 Windows 上对 .exe / .lnk 是**直接执行**，等于把渲染层参数变成
+   * 任意程序启动；界面上真正需要它打开的都是文件夹（mod 目录、存档目录、备份目录）。
+   * 文件走 openExternal 或各自的详情入口。
+   */
   ipcMain.handle('shell:openPath', async (_e, p) => {
     if (!p) return '路径为空';
-    const err = await shell.openPath(String(p));
+    const target = path.resolve(String(p));
+    let st = null;
+    try {
+      st = fs.statSync(target);
+    } catch {
+      return '路径不存在';
+    }
+    if (!st.isDirectory()) return '只能打开文件夹';
+    const err = await shell.openPath(target);
     return err || null;
   });
 
@@ -838,7 +883,7 @@ function registerIpc() {
 
   /** 在 Steam 客户端里打开工坊页面（网页版由界面自己用 openExternal 保底） */
   ipcMain.handle('shell:openWorkshopInSteam', (_e, id) =>
-    openWorkshopInSteam(getSettings(), id, {
+    openWorkshopInSteam(getSettings(), numId(id), {
       openExternal: (u) => {
         shell.openExternal(u).catch(() => {});
       }
@@ -858,7 +903,7 @@ function registerIpc() {
 
   /** 浏览页详情：工坊条目页面里的封面与截图（截图那个接口不给，只能读页面） */
   ipcMain.handle('workshop:media', (_e, id, force) =>
-    getWorkshopMedia(id, { cacheDir: path.join(userDataDir(), 'workshop-pages'), force: !!force })
+    getWorkshopMedia(numId(id), { cacheDir: path.join(userDataDir(), 'workshop-pages'), force: !!force })
   );
 }
 

@@ -1,6 +1,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { stripBom } = require('./mods');
+const { ID_RE } = require('./openinsteam');
+
+/** name 必须是 root 的直接子项（不带 .. / 绝对路径 / 盘符跳转） */
+function isInside(root, name) {
+  const base = path.resolve(String(root || '.'));
+  const target = path.resolve(base, String(name == null ? '' : name));
+  return target !== base && target.startsWith(base + path.sep);
+}
 
 function toSlash(p) {
   return String(p).replace(/\\/g, '/');
@@ -136,11 +144,25 @@ function applyToGame(settings, entries) {
     if (!e) continue;
     if (e.type === 'workshop') {
       if (!e.id) continue;
-      const p = path.join(settings.installedWorkshopDir || '', e.id, 'filelist.xml');
+      /*
+       * id 会拼成 `Installed\<id>\filelist.xml` 写进游戏配置，而合集可能来自别人发来的
+       * xml / json 文件 —— 那两个入口对 id 不设限（纯文本入口才有 \d{5,20} 下限）。
+       * 这里卡一道：不是纯数字就跳过，别把越界路径写进 config_player.xml。
+       */
+      if (!ID_RE.test(String(e.id))) {
+        missing.push(e.name || `#${e.id}`);
+        continue;
+      }
+      const p = path.join(settings.installedWorkshopDir || '', String(e.id), 'filelist.xml');
       if (!fs.existsSync(p)) missing.push(e.name || `#${e.id}`);
       packages.push({ comment: e.name || `#${e.id}`, path: toSlash(p) });
     } else if (e.type === 'local') {
       if (!e.name) continue;
+      // 本地 mod 用文件夹名，同样可能带着 .. 之类的相对段进来
+      if (!isInside(settings.localModsDir, e.name)) {
+        missing.push(e.name);
+        continue;
+      }
       const abs = path.join(settings.localModsDir || '', e.name, 'filelist.xml');
       if (!fs.existsSync(abs)) missing.push(e.name);
       packages.push({ comment: e.name, path: localModPath(settings, e.name) });

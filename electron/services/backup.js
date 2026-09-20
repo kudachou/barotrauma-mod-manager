@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { copyDir, dirStats, sanitizeName, uniqueName, stamp, parseStamp, rmrf } = require('./fsutil');
+const { copyDir, dirStats, sanitizeName, uniqueName, stamp, parseStamp, rmrf, rmrfStrict } = require('./fsutil');
 const { scanDir, stripBom } = require('./mods');
 const { xmlEscape } = require('./modlists');
 const { readWorkshopAcf, installTimeOf, isDelisted } = require('./workshopsync');
@@ -16,6 +16,41 @@ const { readWorkshopAcf, installTimeOf, isDelisted } = require('./workshopsync')
  */
 
 const SNAPSHOT_ROOT_NAME = 'ModManagerBackups';
+
+/**
+ * 把 mod 名解析成绝对路径，并确保它**就是 LocalMods 的直接子目录**。
+ *
+ * modName 来自界面（也可能来自用户导入的合集），直接用 path.join 拼会有两个坑：
+ *   - `..` 之类相对段能跑到 LocalMods 外面去（path.join 会照常规范化，不会报错）；
+ *   - 空串 / `.` 会解析成 LocalMods 自己，接着被 rmrf 就是整个本地 mod 库没了。
+ *
+ * 比较时用 `resolve` 之后的绝对路径，且必须带上 path.sep 再比前缀 —— 只看裸 startsWith
+ * 会把 `...\LocalMods-evil` 这种"前缀相同的兄弟目录"也放进来，等于没校验。
+ *
+ * @param {{localModsDir?: string}} settings
+ * @param {unknown} modName
+ * @returns {string} 校验通过的绝对路径
+ */
+function assertModDir(settings, modName) {
+  const root = path.resolve(settings.localModsDir || '.');
+  const folder = path.resolve(root, String(modName == null ? '' : modName));
+  if (folder === root || !folder.startsWith(root + path.sep)) {
+    throw new Error('非法的 mod 名称');
+  }
+  return folder;
+}
+
+/**
+ * 校验快照 id。id 会拼进快照目录下的路径，允许的形态只有本项目自己生成的那两种：
+ * `YYYYMMDD-HHMMSS` 与加了随机后缀 / 回滚后缀的 `YYYYMMDD-HHMMSS-xxxx`。
+ * @param {unknown} id
+ * @returns {string}
+ */
+function assertSnapshotId(id) {
+  const s = String(id == null ? '' : id).trim();
+  if (!/^\d{8}-\d{6}(-[a-z0-9]{1,8})?$/.test(s)) throw new Error('非法的快照 id');
+  return s;
+}
 
 function snapshotRoot(settings) {
   const parent = settings.localModsDir
@@ -107,7 +142,7 @@ function snapshotSummary(settings, modName) {
 
 /** 给本地 mod 的当前状态打一个快照（只保留最新 MAX_SNAPSHOTS 份） */
 function createSnapshot(settings, modName, opts = {}) {
-  const src = path.join(settings.localModsDir, modName);
+  const src = assertModDir(settings, modName);
   if (!fs.existsSync(src)) throw new Error(`本地 mod 文件夹不存在：${src}`);
 
   const root = modSnapshotDir(settings, modName);
@@ -142,10 +177,10 @@ function createSnapshot(settings, modName, opts = {}) {
 function restoreSnapshot(settings, modName, id, opts = {}) {
   const keepCurrent = opts.keepCurrent !== false;
   const dir = modSnapshotDir(settings, modName);
-  const snapPath = path.join(dir, String(id));
+  const snapPath = path.join(dir, assertSnapshotId(id));
   if (!fs.existsSync(snapPath)) throw new Error('快照不存在或已被删除');
 
-  const dest = path.join(settings.localModsDir, modName);
+  const dest = assertModDir(settings, modName);
 
   const tmp = path.join(dir, `.tmp-${stamp()}-${Math.random().toString(36).slice(2, 6)}`);
   let hasCurrent = false;
@@ -155,8 +190,28 @@ function restoreSnapshot(settings, modName, id, opts = {}) {
     hasCurrent = true;
   }
 
-  rmrf(dest);
-  copyDir(snapPath, dest);
+  /*
+   * rmrf 之后就处于"用户当前的 mod 已经没了"的窗口期：这一步再失败，
+   * 必须把刚才那一份临时副本放回去，否则用户既没有新版本、也没有旧版本。
+   * （这是本项目里唯一允许先删后拷的地方，所以回滚是硬要求，不是可选项。）
+   *
+   * 删除用严格版：吞掉删除失败的异常就等于"以为删干净了、其实在旧文件上覆盖"，
+   * 那样既得不到干净的新版本，也不会走到下面的回滚分支。
+   */
+  rmrfStrict(dest);
+  try {
+    copyDir(snapPath, dest);
+  } catch (e) {
+    if (hasCurrent) {
+      try {
+        rmrf(dest);
+        copyDir(tmp, dest);
+      } catch {
+        /* 还原也失败：下面的错误里会说明原始原因，临时副本仍在 dir 里可人工抢救 */
+      }
+    }
+    throw e;
+  }
 
   let undoId = null;
   if (hasCurrent) {
@@ -179,18 +234,22 @@ function restoreSnapshot(settings, modName, id, opts = {}) {
 
 function deleteSnapshot(settings, modName, id) {
   const dir = modSnapshotDir(settings, modName);
-  const target = path.join(dir, String(id));
-  if (!target.startsWith(dir)) throw new Error('非法路径');
+  // 先按格式白名单校验 id，再解析绝对路径确认没跑出快照目录 —— 只比裸 startsWith 不够：
+  // `...\ModManagerBackups\Foo` 与 `...\ModManagerBackups\Foo-evil` 前缀相同却不是一个目录。
+  const safeId = assertSnapshotId(id);
+  const root = path.resolve(dir);
+  const target = path.resolve(root, safeId);
+  if (target === root || !target.startsWith(root + path.sep)) throw new Error('非法路径');
   rmrf(target);
   const labels = readLabels(dir);
-  delete labels[id];
+  delete labels[safeId];
   writeLabels(dir, labels);
   return { ok: true };
 }
 
 /** 某个本地 mod 占用的空间（mod 本体 + 它的所有快照） */
 function localModFootprint(settings, modName) {
-  const folder = path.join(settings.localModsDir, modName);
+  const folder = assertModDir(settings, modName);
   const modBytes = fs.existsSync(folder) ? dirStats(folder).bytes : 0;
   const snapshots = listSnapshots(settings, modName);
   const snapshotBytes = snapshots.reduce((s, x) => s + x.bytes, 0);
@@ -205,12 +264,9 @@ function localModFootprint(settings, modName) {
 
 /** 删除一个本地 mod：mod 文件夹 + 它的全部历史快照 */
 function deleteLocalModFiles(settings, modName) {
-  const localRoot = path.resolve(settings.localModsDir || '.');
-  const folder = path.resolve(localRoot, modName);
-  // 只允许删 LocalMods 里的东西，防止名字里带 .. 之类的东西跑到外面去
-  if (folder === localRoot || !folder.startsWith(localRoot + path.sep)) {
-    throw new Error('非法的 mod 名称');
-  }
+  const folder = assertModDir(settings, modName);
+  // 不存在就别假装删成功了：以前会返回"已释放 0 字节"，界面看起来像删掉了
+  if (!fs.existsSync(folder)) throw new Error(`本地 mod 不存在：${String(modName)}`);
   const before = localModFootprint(settings, modName);
   rmrf(folder);
   rmrf(modSnapshotDir(settings, modName));
@@ -350,8 +406,11 @@ function planWorkshopBackup(settings, hooks = {}, options = {}) {
   return { items, skipped, totalBytes, totalFiles, updateCount, newCount };
 }
 
+/** 让出事件循环：同步循环里没有 await，取消标志永远没机会被置位（IPC 消息进不来） */
+const yieldToLoop = () => new Promise((r) => setImmediate(r));
+
 /** 执行备份。长任务，调用方负责用事件汇报进度。 */
-function runWorkshopBackup(settings, plan, hooks = {}) {
+async function runWorkshopBackup(settings, plan, hooks = {}) {
   const { onProgress = () => {}, isCancelled = () => false } = hooks;
 
   const errors = [];
@@ -377,16 +436,32 @@ function runWorkshopBackup(settings, plan, hooks = {}) {
     });
 
     try {
-      const dest = path.join(settings.localModsDir, item.folder);
+      const dest = assertModDir(settings, item.folder);
 
+      let snap = null;
       if (fs.existsSync(dest)) {
         // 覆盖前先留快照 —— 这就是「回滚旧版本」的来源
-        createSnapshot(settings, item.folder, { label: '备份更新前' });
+        snap = createSnapshot(settings, item.folder, { label: '备份更新前' });
         snapshotted++;
-        rmrf(dest);
       }
 
-      copyDir(item.source, dest);
+      /*
+       * 覆盖是"先删后拷"，中途失败会留下半个 mod。既然上面刚做了快照，
+       * 这里就必须用上它：删/拷任一失败都把快照还原回去，别把用户的本地版弄丢。
+       */
+      try {
+        if (fs.existsSync(dest)) rmrfStrict(dest);
+        copyDir(item.source, dest);
+      } catch (e) {
+        if (snap) {
+          try {
+            restoreSnapshot(settings, item.folder, snap.id, { keepCurrent: false });
+          } catch {
+            /* 还原失败：快照还在磁盘上，界面上仍能手动回滚 */
+          }
+        }
+        throw e;
+      }
 
       // 让 filelist.xml 的 name 与文件夹名一致，合集里的 <Local name> 才解析得到
       const fl = path.join(dest, 'filelist.xml');
@@ -405,6 +480,8 @@ function runWorkshopBackup(settings, plan, hooks = {}) {
     }
 
     done++;
+    // 每个 mod 之间让出一次，backup:cancel 才有机会被处理（否则界面按钮是死的）
+    await yieldToLoop();
   }
 
   onProgress({
@@ -424,6 +501,8 @@ function runWorkshopBackup(settings, plan, hooks = {}) {
 module.exports = {
   SNAPSHOT_ROOT_NAME,
   MAX_SNAPSHOTS,
+  assertModDir,
+  assertSnapshotId,
   snapshotRoot,
   listSnapshots,
   snapshotSummary,

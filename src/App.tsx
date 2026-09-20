@@ -162,7 +162,8 @@ export default function App() {
   );
 
   useEffect(() => {
-    api.onPreviewReady((p: { id: string; localPath: string | null }) => {
+    // 返回退订函数：重复挂载不会叠加监听（preload 的 on* 现在统一返回退订）
+    const off = api.onPreviewReady?.((p: { id: string; localPath: string | null }) => {
       setData((prev) =>
         prev
           ? {
@@ -174,11 +175,14 @@ export default function App() {
           : prev
       );
     });
+    return () => {
+      off?.();
+    };
   }, []);
 
   // 更新：注册事件推送 + 启动时静默检查一次
   useEffect(() => {
-    api.onUpdaterEvent((s: UpdateState) => setUpdate(s));
+    const off = api.onUpdaterEvent?.((s: UpdateState) => setUpdate(s));
     void (async () => {
       try {
         await api.updaterStatus();
@@ -187,6 +191,9 @@ export default function App() {
         /* 检查更新失败不影响正常使用 */
       }
     })();
+    return () => {
+      off?.();
+    };
   }, []);
 
   const checkUpdate = useCallback(async () => {

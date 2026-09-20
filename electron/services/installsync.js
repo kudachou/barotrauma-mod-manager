@@ -202,9 +202,23 @@ function writeInstallTime(filePath, seconds) {
   fs.writeFileSync(filePath, hasBom ? BOM + out : out, 'utf8');
 }
 
+/** 让出事件循环：同步循环里没有 await，取消标志永远没机会被置位（IPC 消息进不来） */
+const yieldToLoop = () => new Promise((r) => setImmediate(r));
+
 /** 同步一个 mod：整份复制 + 写 installtime，用改名换目录，避免出现残缺状态 */
-function syncOne(settings, item) {
+async function syncOne(settings, item) {
   assertSafeId(item.id);
+
+  /*
+   * 没有 targetTime 就没有可写的 installtime。
+   * 这种情况下再复制一遍是**纯浪费**：拷贝完 installtime 仍然缺，下次计划照样判它待同步，
+   * 用户每点一次同步就多复制几十 MB（.acf 里没有这个 id、走 version-differs 兜底时就是这样）。
+   * 直接失败并说明原因，别报一个"同步成功"的假结果。
+   */
+  if (!item.targetTime) {
+    throw new Error('拿不到这个 mod 的更新时间（.acf 里没有记录），无法写入 installtime —— 跳过，避免每次都白复制一份');
+  }
+
   const steamDir = path.join(settings.workshopModsDir || '', String(item.id));
   const instRoot = settings.installedWorkshopDir || '';
   if (!instRoot) throw new Error('没有配置游戏安装目录（installedWorkshopDir）');
@@ -221,7 +235,8 @@ function syncOne(settings, item) {
 
   try {
     copyDir(steamDir, tmp);
-    if (item.targetTime) writeInstallTime(path.join(tmp, 'filelist.xml'), item.targetTime);
+    writeInstallTime(path.join(tmp, 'filelist.xml'), item.targetTime);
+    await yieldToLoop();
 
     const had = fs.existsSync(instDir);
     if (had) fs.renameSync(instDir, old);
@@ -238,7 +253,7 @@ function syncOne(settings, item) {
       throw e;
     }
     rmrf(old);
-    return item.targetTime || null;
+    return item.targetTime;
   } catch (e) {
     rmrf(tmp);
     const msg = String((e && e.message) || e);
@@ -257,7 +272,7 @@ function syncOne(settings, item) {
  * @param {Array} items planInstallSync 出来的条目（也可以只传一部分）
  * @param {{onProgress?:Function, isCancelled?:Function}} hooks
  */
-function runInstallSync(settings, items, hooks = {}) {
+async function runInstallSync(settings, items, hooks = {}) {
   const { onProgress = () => {}, isCancelled = () => false } = hooks;
   const list = Array.isArray(items) ? items : [];
   const synced = [];
@@ -269,12 +284,14 @@ function runInstallSync(settings, items, hooks = {}) {
     if (isCancelled()) return { synced, failed, bytes, cancelled: true };
     onProgress({ phase: 'syncing', done: i, total: list.length, current: item.name, id: item.id });
     try {
-      const t = syncOne(settings, item);
+      const t = await syncOne(settings, item);
       bytes += item.bytes || 0;
       synced.push({ id: item.id, name: item.name, installTime: t });
     } catch (e) {
       failed.push({ id: item.id, name: item.name, error: String((e && e.message) || e) });
     }
+    // 每个 mod 之间让出一次，backup:cancel / installsync:cancel 才有机会被处理
+    await yieldToLoop();
   }
   onProgress({ phase: 'done', done: list.length, total: list.length, current: null });
   return { synced, failed, bytes, cancelled: false };

@@ -63,13 +63,26 @@ function fixtures() {
   // C：工坊上已下架、游戏里从没装过（真实数据里的 3156077899 就是这种）
   //    Steam 缓存里还留着内容，但条目已经没了 —— 这不是「待同步」，该走「备份已下架的」
   writeMod(WS, '3156077899', { 'filelist.xml': fl('DelistedThing', '1.2'), 'big/pack.bin': 'x' });
+  /*
+   * 缓存条目必须带上 v（当前版本号）与新鲜的 checkedAt。
+   * 少了 v 的话 checksStale() 恒为真 → 界面启动时会**联网**去核实工坊条目
+   * （App.tsx 的 checksStale 自动刷新），于是本测试的结果会随网络浮动：
+   * 查得到就写成 exists:true/false，查不到就写成 exists:null，
+   * 「已下架的 mod 不算待同步」这条断言时过时不过。
+   */
+  const checkEntry = (exists) => ({
+    v: require('../electron/services/workshopsync').CHECKS_VERSION,
+    exists,
+    how: 'apikey',
+    checkedAt: Date.now()
+  });
   fs.writeFileSync(
     path.join(USERDATA, 'workshop-checks.json'),
     JSON.stringify(
       {
-        '3156077899': { exists: false, how: 'apikey', checkedAt: Date.now() },
-        '3680309446': { exists: true, how: 'apikey', checkedAt: Date.now() },
-        '2710000001': { exists: true, how: 'apikey', checkedAt: Date.now() }
+        '3156077899': checkEntry(false),
+        '3680309446': checkEntry(true),
+        '2710000001': checkEntry(true)
       },
       null,
       2

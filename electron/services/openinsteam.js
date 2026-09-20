@@ -19,10 +19,22 @@ const { steamRootCandidates } = require('./detect');
 /** 工坊 id 只允许纯数字，避免拿外部字符串拼出奇怪的 steam:// 命令 */
 const ID_RE = /^\d{1,20}$/;
 
-function steamWorkshopUrl(id) {
+/**
+ * 校验并返回工坊 id（纯数字字符串）。
+ * 工坊 id 会参与拼路径（Installed\<id>\filelist.xml、缓存文件 <id>.png/.miss），
+ * 所以凡是来自界面、合集文件或网络响应的 id，在**进入任何 path.join 之前**都要过这里。
+ * @param {unknown} id
+ * @param {string} [what] 出错时提示的用途，便于定位调用点
+ * @returns {string}
+ */
+function assertWorkshopId(id, what = '工坊 id') {
   const s = String(id == null ? '' : id).trim();
-  if (!ID_RE.test(s)) throw new Error(`非法的工坊 id：${id}`);
-  return `steam://url/CommunityFilePage/${s}`;
+  if (!ID_RE.test(s)) throw new Error(`非法的${what}：${id}`);
+  return s;
+}
+
+function steamWorkshopUrl(id) {
+  return `steam://url/CommunityFilePage/${assertWorkshopId(id)}`;
 }
 
 /**
@@ -86,6 +98,8 @@ function openWorkshopInSteam(settings, id, deps = {}) {
 }
 
 module.exports = {
+  ID_RE,
+  assertWorkshopId,
   steamWorkshopUrl,
   steamExeCandidates,
   findSteamExe,

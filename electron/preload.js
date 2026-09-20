@@ -34,8 +34,15 @@ contextBridge.exposeInMainWorld('api', {
 
   // previews
   fetchPreviews: (ids) => invoke('previews:fetch', ids),
+  /*
+   * 所有 on* 监听都返回退订函数（与 onInstallSyncProgress 保持一致）。
+   * 以前只有一个返回、其余返回 undefined，调用点就没法在 useEffect 清理里退订 ——
+   * 重复挂载会叠加监听，同一个事件回调被触发多次。
+   */
   onPreviewReady: (cb) => {
-    ipcRenderer.on('previews:ready', (_e, payload) => cb(payload));
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('previews:ready', handler);
+    return () => ipcRenderer.removeListener('previews:ready', handler);
   },
 
   // 工坊详情（描述 / 标签 / 热度）；配了 API Key 时描述会是中文（本地化版本）
@@ -87,7 +94,9 @@ contextBridge.exposeInMainWorld('api', {
   startWorkshopBackup: (scope) => invoke('backup:start', scope),
   cancelWorkshopBackup: () => invoke('backup:cancel'),
   onBackupProgress: (cb) => {
-    ipcRenderer.on('backup:progress', (_e, progress) => cb(progress));
+    const handler = (_e, progress) => cb(progress);
+    ipcRenderer.on('backup:progress', handler);
+    return () => ipcRenderer.removeListener('backup:progress', handler);
   },
 
   // 把 Steam 已下载、游戏还没装的工坊更新同步进 Installed
@@ -107,7 +116,9 @@ contextBridge.exposeInMainWorld('api', {
   updaterDownload: () => invoke('updater:download'),
   updaterInstall: () => invoke('updater:install'),
   onUpdaterEvent: (cb) => {
-    ipcRenderer.on('updater:event', (_e, state) => cb(state));
+    const handler = (_e, state) => cb(state);
+    ipcRenderer.on('updater:event', handler);
+    return () => ipcRenderer.removeListener('updater:event', handler);
   },
 
   // misc
