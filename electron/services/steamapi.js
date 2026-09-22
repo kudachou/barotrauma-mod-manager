@@ -28,10 +28,21 @@
 const API_HOSTS = ['api.steampowered.com', 'community.steam-api.com'];
 
 /** 偏好有效期：过了就重新试首选，避免网络环境变好后一直走备用 */
-const PREF_TTL_MS = 30 * 60 * 1000;
+const PREF_TTL_MS = 45 * 60 * 1000;
 
 /** 进程内记住的上次可用域名（跨会话的偏好由调用方传 pref 进来） */
 let remembered = { host: null, at: 0 };
+
+/**
+ * 已经在实测里观察到"能正常工作"的域名。
+ *
+ * 和上面的 remembered 分开：remembered 是**首选顺序**，这里只表示"这个域名我亲眼见它正常返回过"。
+ * 区别很重要 —— `api.steampowered.com` 在本机时好时坏（388ms ↔ 20s），
+ * 如果只因为"记住过"就给它正常超时，那么它每次闹脾气用户都要等 20 秒。
+ * 只有**这一次成功得够快**才把它记成健康；不健康就继续用短超时探测，
+ * 撞上慢响应立刻换域名，而不是干等。
+ */
+const healthy = new Set();
 
 /** 是否是 Steam Web API 的路径（/ISteamXxx、/IPublishedFileService 这类） */
 function isApiPath(p) {
@@ -63,6 +74,18 @@ function remember(host) {
   if (API_HOSTS.includes(host)) remembered = { host, at: Date.now() };
 }
 
+/** 这个域名是不是"亲眼见它正常返回过" */
+function isHealthy(host) {
+  return healthy.has(host);
+}
+
+/** 记下"这个域名这次正常返回了，耗时 ms"。慢响应不记为健康，见上面 healthy 的说明 */
+function noteTiming(host, ms, fastMs = 1500) {
+  if (!API_HOSTS.includes(host)) return;
+  if (ms <= fastMs) healthy.add(host);
+  else healthy.delete(host);
+}
+
 /** 第 attempt 次尝试该用哪个域名：优先用记住的那个，否则按 API_HOSTS 顺序 */
 function resolveHost(attempt = 0) {
   const pref = currentPref();
@@ -70,11 +93,18 @@ function resolveHost(attempt = 0) {
   return order[Math.min(attempt, order.length - 1)];
 }
 
-/** 还有没有下一个域名可换 */
-function hasNextHost(attempt) {
+/**
+ * 还有没有"另一个域名"可换。
+ * @param {number} attempt 当前第几次尝试
+ * @param {object} [opts]
+ * @param {boolean} [opts.forSwitch] true = 问"还要不要换域名"（走完一轮就别再循环了）；
+ *   false/省略 = 问"还能不能再试一次"（允许最后那次宽松超时的收尾尝试）
+ */
+function hasNextHost(attempt, opts = {}) {
   const pref = currentPref();
-  const total = pref ? API_HOSTS.length : API_HOSTS.length;
-  return attempt + 1 < total;
+  const total = API_HOSTS.length;
+  if (opts.forSwitch) return attempt + 1 < total;
+  return attempt < total; // 收尾那次允许走到第 total 次
 }
 
 /**
@@ -96,17 +126,21 @@ function hostForAttempt(urlStr, attempt) {
 /** 仅供测试：清掉记住的偏好 */
 function __resetPref() {
   remembered = { host: null, at: 0 };
+  healthy.clear();
 }
 
 /**
  * 这次请求该给多长的超时。
  *
- * 已知某个域名可用、却在回头试另一个域名时，说明那次探测是为了"万一主域名恢复了"，
- * 不该让用户为它等下去 —— 给短超时。具体数值由调用方决定（见 steam.js）。
- * 没有任何偏好时返回 undefined，表示"按调用方给的正常超时"。
+ * 规则（由调用方 steam.js 传入候选值）：
+ *   1. 已知某个域名可用、却在回头试**另一个**域名 → 短（只是"万一它恢复了"）
+ *   2. 正在用的域名**还没被证实健康** → 中等（探测：超时就说明它当下不对劲，换域名）
+ *   3. 已被证实的健康域名 → 正常超时（慢网络也给它机会）
  */
-function timeoutFor(opts = {}) {
-  return currentPref() ? opts.timeoutMs : opts.firstTimeoutMs;
+function pickTimeout({ host, pref, normalMs, probeMs, staleMs }) {
+  if (pref && pref !== host) return staleMs;
+  if (!isHealthy(host)) return probeMs;
+  return normalMs;
 }
 
 module.exports = {
@@ -118,7 +152,9 @@ module.exports = {
   hasNextHost,
   hostForAttempt,
   remember,
+  isHealthy,
+  noteTiming,
   currentPref,
-  timeoutFor,
+  pickTimeout,
   __resetPref
 };

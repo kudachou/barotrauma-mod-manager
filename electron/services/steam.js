@@ -3,15 +3,42 @@ let https = require('node:https');
 const zlib = require('node:zlib');
 const fs = require('node:fs');
 const path = require('node:path');
-const { hasNextHost, hostForAttempt, remember, isApiUrl, currentPref } = require('./steamapi');
+const {
+  API_HOSTS,
+  hostForAttempt,
+  remember,
+  isApiUrl,
+  currentPref,
+  pickTimeout,
+  noteTiming
+} = require('./steamapi');
 
 const UA = 'BarotraumaModManager/0.1';
 
 /**
- * 已经知道哪个域名能用时，再回头试「已知不可用」的那个域名只给这么长。
- * 那个域名通常是"连得上但不响应"，不设短超时就得等系统自己 reset（实测 11~21 秒）。
+ * 已确认可用的域名 → 用它时给正常超时。
+ * 还没确认过的域名（首选项或正在探测的那个）→ 只给这么长。
+ *
+ * 为什么需要后者：`api.steampowered.com` 在本机**不是稳定坏，而是时好时坏** ——
+ * 顺利时 388~850ms，闹脾气时要 11~20 秒才响应。只做"失败了再换域名"是不够的：
+ * 每次撞上它闹脾气就是一次漫长等待（用户看到的现象是"很慢、有时候要重试"）。
+ * 给短超时之后：超过 4 秒就说明这个域名当下不对劲，马上换备用域名（平时 1~2 秒），
+ * 而不是把 20 秒耗在它身上。
+ */
+const PROBE_TIMEOUT_MS = 4000;
+
+/**
+ * 已经知道哪个域名能用、却在回头试「另一个」域名时，只给这么长。
+ * 那种探测只是"万一主域名恢复了"，不该让用户为它等下去。
  */
 const STALE_HOST_TIMEOUT_MS = 2500;
+
+/**
+ * 两个域名都探测失败后，最后那次收尾尝试的超时。
+ * 双慢的时候（实测某一轮 5 个请求全挂），只有探测超时是不够的：
+ * 多给一次宽松的机会，慢但能响应的请求就有救。
+ */
+const FINAL_TRY_TIMEOUT_MS = 15000;
 
 /**
  * 负面缓存只用于「接口明确回答这个条目没有封面」这种确定性结论。
@@ -24,7 +51,14 @@ const API_BATCH = 50;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function request(urlStr, opts = {}, attempt = 0) {
+/**
+ * @param {string} urlStr
+ * @param {object} opts
+ * @param {number} attempt      第几次尝试（决定用哪个域名）
+ * @param {number} hostSwitches 已经换过几次域名（决定还能不能再换）
+ * @param {number|null} forceTimeout 强制超时（收尾那次用宽松值），null = 按策略算
+ */
+function request(urlStr, opts = {}, attempt = 0, hostSwitches = 0, forceTimeout = null) {
   const {
     method = 'GET',
     headers = {},
@@ -44,29 +78,77 @@ function request(urlStr, opts = {}, attempt = 0) {
   const u = new URL(url);
   const apiUrl = isApiUrl(urlStr);
   /*
-   * 已经知道哪个域名能用、现在是在回头试"已知不可用"的那个域名 → 只给短超时。
-   * 那个域名是「连得上但不响应」型：不设短超时就得等系统自己 reset（实测 11~21 秒），
-   * 而用户等的是整个浏览页面。注意 Node 的 req.setTimeout 在 socket 尚未建立时不可靠，
-   * 所以这里用真实计时器竞速，保证超时一定生效。
+   * 超时策略（只对 **API 请求** 生效：图片下载几 MB，本来就慢，不能拿探测超时去卡它）：
+   *   已知可用域名却在回头试另一个 → 短（只是"万一它恢复了"）
+   *   还没被证实健康的域名         → 中等（探测；超时说明它当下不对劲，换域名）
+   *   已证实健康的域名             → 正常
    */
   const effectiveTimeout =
-    apiUrl && pref && pref !== u.hostname ? STALE_HOST_TIMEOUT_MS : timeoutMs;
+    forceTimeout != null
+      ? forceTimeout
+      : apiUrl
+        ? pickTimeout({
+            host: u.hostname,
+            pref,
+            normalMs: timeoutMs,
+            probeMs: PROBE_TIMEOUT_MS,
+            staleMs: STALE_HOST_TIMEOUT_MS
+          })
+        : timeoutMs;
+
+  /*
+   * 超时用真实计时器竞速（见下面 timer 的注释）。
+   * 计时器要能被"换域名重试"提前清掉，否则旧计时器会在新请求进行到一半时把 Promise 结掉。
+   * 注意：**不要**去重新赋值 resolve/reject —— again() 是在 Promise 里定义的闭包，
+   * 重写外层同名变量会让它捕获到旧的引用，换域名逻辑会整体失效（这个坑踩过一次）。
+   */
+  let timer = null;
+  const clear = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const h = { 'User-Agent': UA, ...headers };
     if (body) h['Content-Length'] = Buffer.byteLength(body);
 
     const again = () => {
+      clear(); // 换域名/退避重试之前先撤掉本次的超时
       /*
-       * 有下一个域名可换 → 换域名重试，别在一个已经稳定 5xx 的域名上耗时间
-       *（换域名不用退避，慢响应本身已经等过一次超时了）；否则按次数退避重试。
+       * ① 还有另一个域名没试过 → 换过去（短超时，见 pickTimeout）
        */
-      if (hasNextHost(attempt)) {
-        resolve(request(urlStr, { ...opts, retries: 0, delayMs: 250 }, attempt + 1));
+      if (hostSwitches + 1 < API_HOSTS.length) {
+        resolve(request(urlStr, { ...opts, delayMs: 250 }, attempt + 1, hostSwitches + 1, null));
         return;
       }
+      /*
+       * ② 两个域名都探测过了（都是短超时）→ 最后来一次**宽松超时**的收尾尝试。
+       *
+       * 这一段是为"两个域名同时抽风"准备的：只有 4 秒探测超时的话，双慢 = 双失败，
+       * 用户看到的就是"打不开、要重试"（实测某一轮 5 个请求全挂）。
+       * 多给一次机会，慢但能响应的请求就有救；真连不上那只能失败 —— 那是网络的事，不是代码的。
+       */
+      if (hostSwitches < API_HOSTS.length) {
+        resolve(
+          request(
+            urlStr,
+            { ...opts, delayMs: 0 },
+            attempt + 1,
+            hostSwitches + 1,
+            Math.max(timeoutMs, FINAL_TRY_TIMEOUT_MS)
+          )
+        );
+        return;
+      }
+      /*
+       * ③ 收尾也失败了 → 按次数退避重试（只在非 API 请求上会走到，API 请求到这里就老实失败）
+       */
       const wait = delayMs == null ? 800 * (attempt + 1) : delayMs;
       sleep(wait).then(
-        () => resolve(request(urlStr, opts, attempt + 1)),
+        () => resolve(request(urlStr, opts, attempt + 1, hostSwitches, null)),
         reject
       );
     };
@@ -86,12 +168,15 @@ function request(urlStr, opts = {}, attempt = 0) {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
+          clear();
           if (code < 200 || code >= 300) {
             reject(new Error('HTTP ' + code));
             return;
           }
           // 这个域名能用 → 记住它，后续请求直接走它（否则每次都要先等主域名超时）
           remember(u.hostname);
+          // 只有"这次成功得够快"才算健康；慢响应不记，下次仍用短超时探测它
+          noteTiming(u.hostname, Date.now() - startedAt);
           let buf = Buffer.concat(chunks);
           const enc = res.headers['content-encoding'];
           try {
@@ -103,7 +188,10 @@ function request(urlStr, opts = {}, attempt = 0) {
           }
           resolve({ buf, headers: res.headers });
         });
-        res.on('error', reject);
+        res.on('error', (e) => {
+          clear();
+          reject(e);
+        });
       }
     );
     req.on('error', (e) => {
@@ -113,6 +201,7 @@ function request(urlStr, opts = {}, attempt = 0) {
         again();
         return;
       }
+      clear();
       reject(e);
     });
     /*
@@ -121,17 +210,9 @@ function request(urlStr, opts = {}, attempt = 0) {
      * req.setTimeout 不一定会触发（实测等到系统自己 reset 要 11~21 秒）。
      * 这里显式竞速，超时后 destroy 掉连接并往上抛「请求超时」，让上层换域名重试。
      */
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       req.destroy(new Error('请求超时'));
     }, effectiveTimeout);
-    const done = (fn) => (v) => {
-      clearTimeout(timer);
-      fn(v);
-    };
-    const _resolve = resolve;
-    const _reject = reject;
-    resolve = done(_resolve);
-    reject = done(_reject);
     if (body) req.write(body);
     req.end();
   });
