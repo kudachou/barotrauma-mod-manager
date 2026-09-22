@@ -820,6 +820,12 @@ select.input option {
   grid-template-rows: minmax(0, 1fr);
   gap: 18px;
   min-height: 0;
+  /*
+   * 必须自己占满 .content 的剩余高度：.content 是 flex 列，少了这一行这个网格就按内容算高，
+   * 里面的 grid-template-rows: minmax(0,1fr) 也跟着塌 —— 表现是编辑器/列表面板只有几百像素高，
+   * 下面一大片空着。
+   */
+  flex: 1;
 }
 
 .list-panel {
@@ -956,6 +962,157 @@ select.input option {
   overflow: visible;
   padding: 0;
   margin-top: 10px;
+}
+
+/*
+ * 合集页「游戏当前应用」的只读视图容器。
+ *
+ * `grid-area: 1 / 1 / -1 / -1` 是必须的：.editor-body 本身是「内容 + 300px mod 选择器」的两列网格，
+ * 而「当前应用」是只读的、没有选择器。只写 grid-column 的话这一项会落到**第 2 行**，
+ * 高度按内容算、编辑器会塌成一条；占满整个网格区域才拿得到完整高度。
+ */
+.applied-body {
+  grid-area: 1 / 1 / -1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.applied-body .hint {
+  flex: none;
+}
+
+/*
+ * 「游戏当前应用」的大卡片视图。
+ * 复用 Mod 库那套 .grid/.card 观感，但卡片更大 —— 这一块就是用来看封面的。
+ *
+ * 下限给到 340（Mod 库是 212）：决定列数的是**这个容器的宽度**，而它比整个窗口窄得多
+ *（1420 的窗口里只有 ~850px），所以下限太小的话窗口稍宽就会被排成 3 列、每张只剩 265px，
+ * 看起来反而比之前更小。给大一点宁可少一列，卡片才真的是"大卡片"。
+ *
+ * 不要用 @media 按视口宽度分列：媒体查询量的是**视口**，和这里的容器宽度不是一回事，
+ * 实测那样会在 1200 的窗口里排出 3 列 191px 的卡片。
+ *
+ * 上限怎么实现的：**不能**写 `minmax(340px, 420px)` —— minmax() 的两个参数不能都是固定长度，
+ * 那是非法 CSS（vite 会警告 css-syntax-error，然后轨道退化成 1fr 把卡片拉满一整行）。
+ * 正确做法是轨道用 `minmax(340px, 1fr)`，再给卡片自己 `max-width: 420px` 封顶。
+ *
+ * 420 这个数字不是随手写的：封面是 16:10，420px 宽对应 262px 高，和内容区高度（约 660px）
+ * 比下来一次能完整看到一两行；再宽也只是把封面撑大、并不会多显示信息。
+ */
+/*
+ * 「游戏当前应用」的大卡片视图。
+ *
+ * 参照的是钢 4 那种 mod 列表：**每张卡片是独立的一条**，左边一个缩略图、右边名字与版本。
+ * 所以刻意**不用** .card / .card-cover（那是 Mod 库的整张大封面网格），改用独立的一套类：
+ *
+ * 为什么不用 aspect-ratio：.card-cover 靠 aspect-ratio:16/10 决定高度，而高度又反过来
+ * 参与网格行高的计算 —— 实测会算错，卡片直接叠到下一行上。缩略图给**固定高度**最简单可靠。
+ */
+.mod-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: grid;
+  /* 列宽夹在 320~460，窗口再宽也只是多排一列，不会把卡片拉成一张超大的图 */
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  align-items: start;
+  gap: 10px;
+  align-content: start;
+}
+
+.mod-cards > .mod-tile {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.mod-cards > .mod-tile:hover {
+  border-color: var(--border-strong);
+}
+
+/* 缩略图：固定尺寸，不依赖宽高比 */
+.tile-thumb {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  flex: none;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-3);
+}
+
+.tile-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tile-thumb .cover-ph {
+  width: 100%;
+  height: 100%;
+  font-size: 24px;
+}
+
+/* 加载顺序角标 */
+.tile-order {
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  z-index: 2;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: rgba(8, 14, 26, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+.tile-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.tile-name {
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1.35;
+  /* 长名字最多两行，不把卡片撑高 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tile-sub {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tile-meta {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .mod-row {

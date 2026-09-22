@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppliedInfo, ModInfo, ModlistEntry, ModlistFull, ModlistSummary } from '../types';
 import { api, imgSrc, placeholderHue } from '../api';
 import { compareBadge, initials, safeFileName, uniq } from '../ui';
+import { categoryStyle } from '../categories';
 import {
   IconAlert,
   IconCheck,
@@ -14,12 +15,28 @@ import {
   IconRefresh,
   IconSave,
   IconSearch,
-  IconTrash
+  IconTrash,
+  IconViewCard,
+  IconViewList
 } from './Icons';
 import ShareModal from './ShareModal';
 
 /** 合集列表里的一个虚拟条目：游戏当前生效的内容 */
 const APPLIED = '__applied__';
+
+/**
+ * 「游戏当前应用」这块的两种看法：紧凑列表（一屏看很多）与 大卡片（看得清封面）。
+ * 记在 localStorage 里，不用每次进来重选；读不到就按列表（和以前一致）。
+ */
+const APPLIED_VIEW_KEY = 'bmm.collections.appliedView';
+
+function readAppliedView(): 'list' | 'card' {
+  try {
+    return window.localStorage.getItem(APPLIED_VIEW_KEY) === 'card' ? 'card' : 'list';
+  } catch {
+    return 'list';
+  }
+}
 
 export default function CollectionsView({
   mods,
@@ -48,6 +65,17 @@ export default function CollectionsView({
   const [onlyMissing, setOnlyMissing] = useState(false);
   /** 合集分享弹窗：null = 关闭 */
   const [shareMode, setShareMode] = useState<'export' | 'import' | null>(null);
+  /** 「游戏当前应用」用列表还是大卡片看（记住选择） */
+  const [appliedView, setAppliedView] = useState<'list' | 'card'>(readAppliedView);
+
+  function changeAppliedView(v: 'list' | 'card') {
+    setAppliedView(v);
+    try {
+      window.localStorage.setItem(APPLIED_VIEW_KEY, v);
+    } catch {
+      /* 存不了就只是这次会话生效，不影响使用 */
+    }
+  }
 
   /** 打开某个工坊条目的页面去订阅（优先 Steam 客户端，失败退回网页版） */
   async function openWorkshopPage(id: string) {
@@ -395,6 +423,25 @@ export default function CollectionsView({
               </span>
             )}
             <span className="spacer" />
+            {/* 列表看条数、卡片看封面 —— 只影响这里的显示方式 */}
+            <div className="seg" title="换个看法：紧凑列表 / 大卡片">
+              <button
+                className={appliedView === 'list' ? 'active' : ''}
+                onClick={() => changeAppliedView('list')}
+                aria-pressed={appliedView === 'list'}
+              >
+                <IconViewList size={14} />
+                列表
+              </button>
+              <button
+                className={appliedView === 'card' ? 'active' : ''}
+                onClick={() => changeAppliedView('card')}
+                aria-pressed={appliedView === 'card'}
+              >
+                <IconViewCard size={14} />
+                大卡片
+              </button>
+            </div>
             <button className="btn sm" onClick={() => void onRefresh()}>
               <IconRefresh size={14} />
               刷新
@@ -415,11 +462,83 @@ export default function CollectionsView({
                 <div>在任意合集里点「应用到游戏」，这里就会显示实际生效的 mod</div>
               </div>
             ) : (
-              <>
+              /* 只读视图：说明固定在顶部，下面按选择渲染列表或大卡片（占满整行、自己滚动） */
+              <div className="applied-body">
                 <div className="hint">
                   这是游戏现在真正加载的 mod，按加载顺序排列（读自 config_player.xml）。
                   这里是只读的，要改请回到对应合集里改完再应用。
                 </div>
+                {appliedView === 'card' ? (
+                  /* 卡片：每张一条（左边缩略图 + 右边名字/版本），顺序用缩略图角标表示 */
+                  <div className="mod-cards">
+                    {appliedRows.map((r, i) => {
+                      const hue = placeholderHue(r.entry.name || r.entry.id || '?');
+                      const src = imgSrc(r.mod?.preview || null);
+                      const cb = r.mod ? compareBadge(r.mod) : null;
+                      const name = r.mod?.name || r.entry.name || `#${r.entry.id}`;
+                      return (
+                        <div key={r.key} className="mod-tile" title={name}>
+                          <div className="tile-thumb">
+                            {src ? (
+                              <img src={src} alt="" loading="lazy" />
+                            ) : (
+                              <div
+                                className="cover-ph"
+                                style={{
+                                  background: `linear-gradient(140deg, hsl(${hue} 52% 34%), hsl(${(hue + 46) % 360} 58% 16%))`
+                                }}
+                              >
+                                {initials(r.entry.name || r.entry.id || '?')}
+                              </div>
+                            )}
+                            <div className="tile-order">{i + 1}</div>
+                          </div>
+                          <div className="tile-main">
+                            <div className="tile-name">{name}</div>
+                            <div className="tile-sub">
+                              <span
+                                className={`badge ${r.entry.type === 'local' ? 'src-local' : 'src-workshop'}`}
+                              >
+                                {r.entry.type === 'local' ? '本地' : '工坊'}
+                              </span>
+                              {r.mod?.modVersion ? (
+                                <span className="badge ver">v{r.mod.modVersion}</span>
+                              ) : (
+                                <span className="badge st-different">版本未知</span>
+                              )}
+                              {cb && (
+                                <span className={`badge ${cb.cls}`}>
+                                  {cb.cls === 'st-same' ? (
+                                    <IconCheck size={11} />
+                                  ) : cb.cls === 'st-none' ? null : (
+                                    <IconAlert size={11} />
+                                  )}
+                                  {cb.text}
+                                </span>
+                              )}
+                              {!r.mod && <span className="badge st-different">未找到</span>}
+                            </div>
+                            {/* 分类标签：和 Mod 库一致，方便一眼看出这是什么类型的 mod */}
+                            <div className="tile-meta">
+                              {uniq([...(r.mod?.categories || []), ...(r.mod?.autoCategories || [])])
+                                .slice(0, 3)
+                                .map((t) => (
+                                  <span key={t} className="tag" style={categoryStyle(t)}>
+                                    {t}
+                                  </span>
+                                ))}
+                              {r.entry.type === 'workshop' && (
+                                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                                  #{r.entry.id}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
                 <div className="mod-rows">
                   {appliedRows.map((r, i) => {
                     const hue = placeholderHue(r.entry.name || r.entry.id || '?');
@@ -463,7 +582,8 @@ export default function CollectionsView({
                     );
                   })}
                 </div>
-              </>
+                )}
+              </div>
             )}
           </div>
         </div>

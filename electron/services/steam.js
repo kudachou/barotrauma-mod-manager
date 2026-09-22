@@ -1,9 +1,17 @@
-const https = require('node:https');
+// 用 let：测试要用 __withHttps 临时替换它（见文件末尾），验证"换域名重试"的真实行为
+let https = require('node:https');
 const zlib = require('node:zlib');
 const fs = require('node:fs');
 const path = require('node:path');
+const { hasNextHost, hostForAttempt, remember, isApiUrl, currentPref } = require('./steamapi');
 
 const UA = 'BarotraumaModManager/0.1';
+
+/**
+ * 已经知道哪个域名能用时，再回头试「已知不可用」的那个域名只给这么长。
+ * 那个域名通常是"连得上但不响应"，不设短超时就得等系统自己 reset（实测 11~21 秒）。
+ */
+const STALE_HOST_TIMEOUT_MS = 2500;
 
 /**
  * 负面缓存只用于「接口明确回答这个条目没有封面」这种确定性结论。
@@ -17,17 +25,51 @@ const API_BATCH = 50;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function request(urlStr, opts = {}, attempt = 0) {
-  const { method = 'GET', headers = {}, body = null, timeoutMs = 20000, retries = 2 } = opts;
+  const {
+    method = 'GET',
+    headers = {},
+    body = null,
+    timeoutMs = 20000,
+    retries = 2,
+    delayMs = null
+  } = opts;
+  const pref = currentPref();
+  /*
+   * 重试时**换一个 API 域名**。
+   * 实测某些网络环境（开着加速器也只代理了 steamcommunity）下 api.steampowered.com
+   * 稳定 503 / 超时，而 Steam 的另一个入口 community.steam-api.com 0.9 秒就返回 ——
+   * 见 steamapi.js 里的实测表格。图片 CDN、工坊页面这类非 API 地址不受影响。
+   */
+  const url = hostForAttempt(urlStr, attempt);
+  const u = new URL(url);
+  const apiUrl = isApiUrl(urlStr);
+  /*
+   * 已经知道哪个域名能用、现在是在回头试"已知不可用"的那个域名 → 只给短超时。
+   * 那个域名是「连得上但不响应」型：不设短超时就得等系统自己 reset（实测 11~21 秒），
+   * 而用户等的是整个浏览页面。注意 Node 的 req.setTimeout 在 socket 尚未建立时不可靠，
+   * 所以这里用真实计时器竞速，保证超时一定生效。
+   */
+  const effectiveTimeout =
+    apiUrl && pref && pref !== u.hostname ? STALE_HOST_TIMEOUT_MS : timeoutMs;
   return new Promise((resolve, reject) => {
-    const u = new URL(urlStr);
     const h = { 'User-Agent': UA, ...headers };
     if (body) h['Content-Length'] = Buffer.byteLength(body);
 
-    const again = () =>
-      sleep(800 * (attempt + 1)).then(
+    const again = () => {
+      /*
+       * 有下一个域名可换 → 换域名重试，别在一个已经稳定 5xx 的域名上耗时间
+       *（换域名不用退避，慢响应本身已经等过一次超时了）；否则按次数退避重试。
+       */
+      if (hasNextHost(attempt)) {
+        resolve(request(urlStr, { ...opts, retries: 0, delayMs: 250 }, attempt + 1));
+        return;
+      }
+      const wait = delayMs == null ? 800 * (attempt + 1) : delayMs;
+      sleep(wait).then(
         () => resolve(request(urlStr, opts, attempt + 1)),
         reject
       );
+    };
 
     const req = https.request(
       { hostname: u.hostname, port: u.port || 443, path: u.pathname + u.search, method, headers: h },
@@ -48,6 +90,8 @@ function request(urlStr, opts = {}, attempt = 0) {
             reject(new Error('HTTP ' + code));
             return;
           }
+          // 这个域名能用 → 记住它，后续请求直接走它（否则每次都要先等主域名超时）
+          remember(u.hostname);
           let buf = Buffer.concat(chunks);
           const enc = res.headers['content-encoding'];
           try {
@@ -71,7 +115,23 @@ function request(urlStr, opts = {}, attempt = 0) {
       }
       reject(e);
     });
-    req.setTimeout(timeoutMs, () => req.destroy(new Error('请求超时')));
+    /*
+     * 用真实计时器做超时，而不是只靠 req.setTimeout：
+     * 被墙的域名是「TCP 连得上、但服务端不响应」，这种半开状态在 socket 建立**之前**
+     * req.setTimeout 不一定会触发（实测等到系统自己 reset 要 11~21 秒）。
+     * 这里显式竞速，超时后 destroy 掉连接并往上抛「请求超时」，让上层换域名重试。
+     */
+    const timer = setTimeout(() => {
+      req.destroy(new Error('请求超时'));
+    }, effectiveTimeout);
+    const done = (fn) => (v) => {
+      clearTimeout(timer);
+      fn(v);
+    };
+    const _resolve = resolve;
+    const _reject = reject;
+    resolve = done(_resolve);
+    reject = done(_reject);
     if (body) req.write(body);
     req.end();
   });
@@ -329,8 +389,25 @@ function createQueue(concurrency, delayMs) {
   };
 }
 
+/**
+ * 仅供测试：临时把 https 换成假实现，跑完自动还原。
+ * 用来验证"主域名失败时会改用备用域名"这条真实行为（而不是只测工具函数）。
+ */
+async function __withHttps(fake, fn) {
+  const real = https;
+  try {
+    // eslint-disable-next-line no-global-assign
+    https = fake;
+    return await fn();
+  } finally {
+    // eslint-disable-next-line no-global-assign
+    https = real;
+  }
+}
+
 module.exports = {
   request,
+  __withHttps,
   fetchDetails,
   fetchLocalizedDetails,
   getWorkshopDetails,

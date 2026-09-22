@@ -194,3 +194,23 @@ export const IconClock = (p: IconProps) => (
     <path d="M12 7.5V12l3 1.8" />
   </S>
 );
+
+/** 列表模式：每行一条，左侧一个小缩略图 */
+export const IconViewList = (p: IconProps) => (
+  <S {...p}>
+    <rect x="3" y="4.5" width="4" height="4" rx="1" />
+    <rect x="3" y="10" width="4" height="4" rx="1" />
+    <rect x="3" y="15.5" width="4" height="4" rx="1" />
+    <path d="M10 6.5h11M10 12h11M10 17.5h11" />
+  </S>
+);
+
+/** 大卡片模式：网格铺开，封面看得清 */
+export const IconViewCard = (p: IconProps) => (
+  <S {...p}>
+    <rect x="3" y="4" width="8" height="7" rx="1.4" />
+    <rect x="13" y="4" width="8" height="7" rx="1.4" />
+    <rect x="3" y="13" width="8" height="7" rx="1.4" />
+    <rect x="13" y="13" width="8" height="7" rx="1.4" />
+  </S>
+);

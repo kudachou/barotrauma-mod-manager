@@ -73,6 +73,10 @@ async function defaultGetJson(url) {
   lastAt = Date.now();
   const res = await request(url, {
     headers: { Accept: 'application/json' },
+    /*
+     * 8 秒：正常请求 1~3 秒就回来了，等更久只说明这个域名/这个请求有问题
+     *（实测某个排序+页大小的组合要 57 秒），早点失败让上层去试备用域名更好。
+     */
     timeoutMs: 8000,
     retries: 1
   });
@@ -168,15 +172,24 @@ async function browse(params, deps = {}) {
     const msg = String((e && e.message) || e);
     // 带上可操作的说法，而不是把 ECONNRESET / 请求超时 直接甩给用户。
     // 注意：国内不开加速器时 api.steampowered.com 基本连不上，超时是常态、不是 bug。
+    // 5xx 单独说：那通常是加速器**只代理了 steamcommunity、没代理 API 域名** ——
+    // 浏览器能打开工坊页但这里报 503 就是这种情形（详见 steamapi.js 的实测表格）。
     const friendly = /HTTP 403/.test(msg)
       ? 'Steam 拒绝了这个 API Key（可能填错了，或者 Key 已失效）'
       : /HTTP 429/.test(msg)
         ? '请求太频繁，被 Steam 限流了，稍等一下再试'
-        : /请求超时|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|ECONNREFUSED|fetch failed/i.test(
-              msg
-            )
-          ? '连不上 Steam —— 国内通常需要开加速器/代理。确认浏览器能打开 steamcommunity.com 之后再试'
-          : `读取失败：${msg}`;
+        : /HTTP 5\d\d/.test(msg)
+          ? 'Steam 的 API 入口拒绝了请求（HTTP ' +
+            (msg.match(/HTTP (\d+)/) || [])[1] +
+            '）—— 连不上 Steam。' +
+            '这种错常见于加速器只代理了 steamcommunity.com、没代理 api.steampowered.com：' +
+            '浏览器能打开创意工坊，但管理器走的是 Web API。已自动试过备用入口仍失败，' +
+            '把加速器切成全局/系统代理模式，或等一会儿再试'
+          : /请求超时|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|ECONNREFUSED|fetch failed/i.test(
+                msg
+              )
+            ? '连不上 Steam —— 国内通常需要开加速器/代理。确认浏览器能打开 steamcommunity.com 之后再试'
+            : `读取失败：${msg}`;
     return {
       needsKey: false,
       items: [],
@@ -214,7 +227,15 @@ async function browse(params, deps = {}) {
  */
 const TAGS_TTL_MS = 6 * 60 * 60 * 1000;
 const TAG_SCAN_SORTS = [12, 3, 1]; // 订阅榜 + 趋势 + 最新，覆盖面比只扫一个榜大
-const TAG_SCAN_PER_PAGE = 100;
+/**
+ * 标签扫描每页取多少。
+ *
+ * **不要写 100**：实测 `numperpage=100` + 订阅榜（query_type=12）这一组合，
+ * 同样 479KB 的响应要 **57 秒**才回来（其它排序、其它页大小都是 1~3 秒），
+ * 于是标签页看起来就是"卡住/报连不上"。50 稳定在 1.3~2.4 秒，
+ * 3 个榜 × 50 条 = 150 条样本，统计出来的标签完全够用。
+ */
+const TAG_SCAN_PER_PAGE = 50;
 
 let tagCache = { at: 0, key: '', tags: [] };
 

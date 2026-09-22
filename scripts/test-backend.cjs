@@ -1220,6 +1220,106 @@ async function tail() {
     const err3 = await wb.browse({}, { key: 'K', getJson: async () => { throw new Error('请求超时'); } });
     ok(/加速器/.test(err3.error || ''), '超时提示里点名加速器/代理（国内不开就连不上）');
 
+    /* ---- 备用 API 域名：主域名 5xx 时得换一个再试，并且记住哪个能用 ----
+     *
+     * 实测某网络环境（加速器只代理了 steamcommunity）下 api.steampowered.com 稳定 503/超时，
+     * 而 community.steam-api.com 0.9 秒返回 —— 这是「浏览器能开工坊、管理器不能」的原因。
+     * 光"失败后换域名"不够：主域名每次都要先白等一次超时（实测单次浏览 20 秒）。
+     */
+    console.log('\n[14b] 备用 API 域名与「记住可用的入口」');
+
+    const steamapi = require('../electron/services/steamapi');
+    const steamMod = require('../electron/services/steam');
+    steamapi.__resetPref();
+
+    ok(
+      steamapi.API_HOSTS[0] === 'api.steampowered.com' && steamapi.API_HOSTS.length >= 2,
+      '首选仍是官方主域名，备选在后（实际 ' + steamapi.API_HOSTS.join(' → ') + '）'
+    );
+
+    const apiUrl = 'https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/?a=1';
+    ok(steamapi.hostForAttempt(apiUrl, 0) === apiUrl, '第 1 次尝试：URL 原样不动');
+    ok(
+      steamapi.hostForAttempt(apiUrl, 1) ===
+        'https://' + steamapi.API_HOSTS[1] + '/IPublishedFileService/QueryFiles/v1/?a=1',
+      '第 2 次尝试：换成备用域名，路径与参数保持不变'
+    );
+    const imgUrl = 'https://images.steamusercontent.com/ugc/1/abc/?imw=100';
+    ok(steamapi.hostForAttempt(imgUrl, 1) === imgUrl, '图片 CDN 不是 API，不会被换域名');
+    ok(
+      steamapi.hostForAttempt('https://steamcommunity.com/sharedfiles/filedetails/?id=1', 1) ===
+        'https://steamcommunity.com/sharedfiles/filedetails/?id=1',
+      '工坊页面也不是 API，不会被换域名'
+    );
+
+    // 记住备用域名之后：第 1 次就该直接走它，不再白等主域名
+    steamapi.remember(steamapi.API_HOSTS[1]);
+    ok(
+      steamapi.hostForAttempt(apiUrl, 0) ===
+        'https://' + steamapi.API_HOSTS[1] + '/IPublishedFileService/QueryFiles/v1/?a=1',
+      '已记住备用域名可用 → 第 1 次就直接走它（省掉主域名那次超时等待）'
+    );
+    ok(steamapi.hasNextHost(0) === true, '此时仍保留换回主域名重试的余地');
+    steamapi.__resetPref();
+    ok(steamapi.resolveHost(0) === steamapi.API_HOSTS[0], '偏好清掉后回到主域名优先');
+
+    // 真跑一次：注入的 https.request 让主域名 500、备用域名 200，断言它真的换了域名
+    const seenHosts = [];
+    const fakeHttps = {
+      request(opts, cb) {
+        seenHosts.push(opts.hostname);
+        const code = opts.hostname === 'api.steampowered.com' ? 500 : 200;
+        const res = {
+          statusCode: code,
+          headers: {},
+          on(ev, fn) {
+            if (ev === 'data') setImmediate(() => fn(Buffer.from('{"ok":1}')));
+            if (ev === 'end') setImmediate(() => fn());
+            return this;
+          },
+          resume() {}
+        };
+        setImmediate(() => cb(res));
+        // 形状要和 http.ClientRequest 一致：on/setTimeout/write/end/destroy 都能链式调用
+        const req = {
+          on() {
+            return req;
+          },
+          setTimeout() {
+            return req;
+          },
+          write() {
+            return req;
+          },
+          end() {
+            return req;
+          },
+          destroy() {
+            return req;
+          }
+        };
+        return req;
+      }
+    };
+    steamapi.__resetPref();
+    const ok1 = await steamMod.__withHttps(fakeHttps, () =>
+      steamMod
+        .request('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', {
+          method: 'POST',
+          body: 'x=1',
+          timeoutMs: 3000
+        })
+        .then(() => true)
+        .catch(() => false)
+    );
+    ok(ok1 === true, '主域名 500 时会改用备用域名并把请求跑通');
+    ok(
+      seenHosts.includes('api.steampowered.com') && seenHosts.includes('community.steam-api.com'),
+      '确实依次访问了两个域名（实际 ' + seenHosts.join(' → ') + '）'
+    );
+    ok(steamapi.currentPref() === 'community.steam-api.com', '成功后记住了可用的那个域名');
+    steamapi.__resetPref();
+
     /* ---- 「在 Steam 客户端里打开工坊页面」的 URL 组装与兜底 ---- */
     console.log('\n[15] 在 Steam 客户端里打开工坊页面');
 

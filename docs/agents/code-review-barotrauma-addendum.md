@@ -33,6 +33,8 @@
    先删后拷 = 中途失败即数据丢失；参照 installsync.syncOne 已验证的「临时目录 + 改名」方案。
 5. 外部输入：Steam Web API（需 key）、工坊页面 HTML 正则、MyMemory 翻译 API、
    mod 的 filelist.xml 与 XML、用户导入的合集（xml/json/任意文本）、.acf、gzip+UTF-16LE 的 .save。
+   - Steam API 走 `services/steamapi.js`：主域名 `api.steampowered.com` 被加速器漏掉时会稳定 503，
+     重试时自动换 `community.steam-api.com`。**别把域名硬编码回单一入口。**
 6. 缓存与设置写盘：userData 下的 categories.json / relations.json / steam-api-key.json /
    workshop-checks.json。当前多处 catch 后静默忽略，会出现「提示保存成功但重启丢失」。
 7. 同步/备份是**全同步循环**（无 await），主进程会被冻住，取消通道形同虚设 ——

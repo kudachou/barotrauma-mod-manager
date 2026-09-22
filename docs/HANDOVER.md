@@ -250,6 +250,25 @@ electron/services/*.js     业务逻辑；其中只有 settings.js / updater.js 
 
 ### 4.5 Steam Web API（浏览工坊）
 
+> ⚠️ **API 域名会被加速器漏掉**：实测本机（开着加速器）`api.steampowered.com` 稳定返回
+> **503**（Akamai 边缘 `errors.edgesuite.net`）或超时，而 `steamcommunity.com` 与
+> `store.steampowered.com` 都 200 —— 所以现象是「浏览器能打开创意工坊、管理器却报 503」。
+> 不是 key / UA / TLS 指纹的问题（Node https 与 Chromium 网络栈、四种 UA 都试过，结果一样），
+> 而是加速器只代理了网页域名。
+> **解决**：`services/steamapi.js` 提供备用入口 `community.steam-api.com`（Steam 另一个正式
+> API 入口，接口形状一致，实测 QueryFiles / GetDetails / GetServerInfo 全通）；
+> `steam.js` 的 `request` 与 `workshopsync.js` 的 `httpGetStatus` 在 5xx / 连不上时
+> **换域名重试**，并且**记住哪个域名能用**（否则每次请求都要先白等一次主域名超时）。
+> 主域名能用就仍走主域名，不硬编码单一入口。2026-09-20 实测备用域名：total=83067、
+> 中文标题、24 个分类标签、封面全有。
+>
+> ⚠️ **两个性能坑（都已修，别再踩回去）**：
+> 1. `req.setTimeout()` 对「TCP 连得上但服务端不响应」的域名**不可靠**（socket 建立前不触发），
+>    只能等系统自己 reset，实测 11~21 秒。`steam.js` 里改用**真实计时器**竞速 + destroy。
+> 2. `numperpage=100` 配订阅榜（`query_type=12`）**单独要 57 秒**（同样 479KB，其它排序只要 1~2 秒）。
+>    所以标签扫描用 `TAG_SCAN_PER_PAGE = 50`（3 个榜 × 50 = 150 条样本足够）。
+> 修前/修后：打开浏览工坊 **20.4s → 2.4s**、分类标签 **75s/失败 → 6.7s**（缓存命中 0ms）。
+
 - `IPublishedFileService/QueryFiles/v1`（**必须带 key**，GET）：
   - `query_type`：`12`=我的订阅、`0`=最高评分、`3`=趋势、`21`=最近更新、`1`=最新、`11`=文本搜索
   - 必须 `return_metadata=true`；`numperpage` 上限 100；`requiredtags[0]=X` 用数组形式，多个是 AND，最多 3 个

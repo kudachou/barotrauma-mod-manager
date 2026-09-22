@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const https = require('node:https');
+const { API_HOSTS, hostForAttempt, hasNextHost, remember, isApiUrl } = require('./steamapi');
 
 const { stripBom } = require('./mods');
 const { fetchDetails } = require('./steam');
@@ -225,17 +226,49 @@ function fetchText(url, timeout = 20000) {
   });
 }
 
-/** 带状态码的 GET（Steam API 要用状态码区分「Key 无效」） */
-function httpGetStatus(url, timeout = 20000) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { Accept: 'application/json' } }, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
-    });
-    req.on('error', reject);
-    req.setTimeout(timeout, () => req.destroy(new Error('请求 Steam API 超时')));
-  });
+/**
+ * 带状态码的 GET（Steam API 要用状态码区分「Key 无效」）。
+ *
+ * 5xx / 连不上时会**换一个 Steam API 域名**再试（见 steamapi.js：某些网络环境下
+ * api.steampowered.com 稳定 503，而 community.steam-api.com 0.9 秒就返回）。
+ * 成功的域名会被记住，后续请求直接走它 —— 否则每次都要先白等一次主域名超时。
+ * 401/403 这类"请求本身没问题、是 key 的问题"不换域名，直接交给调用方判断。
+ */
+async function httpGetStatus(url, timeout = 20000) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < API_HOSTS.length; attempt++) {
+    const target = hostForAttempt(url, attempt);
+    const host = (() => {
+      try {
+        return new URL(target).hostname;
+      } catch {
+        return null;
+      }
+    })();
+    try {
+      const res = await new Promise((resolve, reject) => {
+        const req = https.get(target, { headers: { Accept: 'application/json' } }, (r) => {
+          const chunks = [];
+          r.on('data', (c) => chunks.push(c));
+          r.on('end', () =>
+            resolve({ status: r.statusCode, body: Buffer.concat(chunks).toString('utf8') })
+          );
+          r.on('error', reject);
+        });
+        req.on('error', reject);
+        req.setTimeout(timeout, () => req.destroy(new Error('请求 Steam API 超时')));
+      });
+      if (res.status === 401 || res.status === 403 || res.status < 500) {
+        if (res.status === 200 && host && isApiUrl(url)) remember(host);
+        return res;
+      }
+      lastErr = new Error('HTTP ' + res.status);
+    } catch (e) {
+      lastErr = e;
+    }
+    if (hasNextHost(attempt)) await sleep(250);
+  }
+  throw lastErr || new Error('请求 Steam API 失败');
 }
 
 /**
