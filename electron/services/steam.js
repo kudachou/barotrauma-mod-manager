@@ -8,37 +8,47 @@ const {
   hostForAttempt,
   remember,
   isApiUrl,
-  currentPref,
-  pickTimeout,
-  noteTiming
+  noteTiming,
+  noteResult,
+  candidateCount,
+  savePref,
+  loadPref,
+  prewarmHttp
 } = require('./steamapi');
 
 const UA = 'BarotraumaModManager/0.1';
 
 /**
- * 已确认可用的域名 → 用它时给正常超时。
- * 还没确认过的域名（首选项或正在探测的那个）→ 只给这么长。
+ * API 请求的单次超时。
  *
- * 为什么需要后者：`api.steampowered.com` 在本机**不是稳定坏，而是时好时坏** ——
- * 顺利时 388~850ms，闹脾气时要 11~20 秒才响应。只做"失败了再换域名"是不够的：
- * 每次撞上它闹脾气就是一次漫长等待（用户看到的现象是"很慢、有时候要重试"）。
- * 给短超时之后：超过 4 秒就说明这个域名当下不对劲，马上换备用域名（平时 1~2 秒），
- * 而不是把 20 秒耗在它身上。
+ * 取值依据（本机加速器环境实测）：
+ *   两个域名的正常延迟都在 **1.1~4.3 秒**（偶尔整段抽风到 20 秒以上）。
+ *   所以超时必须明显高于 4.3 秒，否则会把"慢但能成"的请求误判成失败 ——
+ *   这个坑我踩了好几轮（用过 2.5s / 4s 做探测，结果**备用域名被误杀**，
+ *   用户看到的是"十几秒后失败、重试也不行"）。
  */
-const PROBE_TIMEOUT_MS = 4000;
+const API_ATTEMPT_TIMEOUT_MS = 12000;
 
 /**
- * 已经知道哪个域名能用、却在回头试「另一个」域名时，只给这么长。
- * 那种探测只是"万一主域名恢复了"，不该让用户为它等下去。
+ * **第一个候选**域名的超时。
+ *
+ * 它短一点是为了快速失败：首选域名不可用时（实测要 21 秒才 ECONNRESET），
+ * 用 12 秒等它等于让用户白等 12 秒（+ 备用 2 秒 = 冷启动十几秒）。
+ * 5 秒足够覆盖正常延迟（1.1~4.3 秒），超过了就说明它当下不行，换下一个候选。
+ *
+ * 换到**下一个候选**时用回 API_ATTEMPT_TIMEOUT_MS（12 秒）—— 那是最后的指望，
+ * 给它足够余量，宁可慢也别误判失败。
  */
-const STALE_HOST_TIMEOUT_MS = 2500;
+const FIRST_ATTEMPT_TIMEOUT_MS = 5000;
 
 /**
- * 两个域名都探测失败后，最后那次收尾尝试的超时。
- * 双慢的时候（实测某一轮 5 个请求全挂），只有探测超时是不够的：
- * 多给一次宽松的机会，慢但能响应的请求就有救。
+ * 启动时预探测的超时。
+ *
+ * 探的是 `ISteamWebAPIUtil/GetServerInfo`（几十字节的小响应，实测 1~3 秒），
+ * 所以 4 秒足够；**不要**用 12 秒 —— 那样冷启动时要等它超时，用户点开浏览工坊反而更慢。
+ * 探到哪个域名能用就把它记为偏好，于是"冷启动第一次点浏览"不用再先探一次。
  */
-const FINAL_TRY_TIMEOUT_MS = 15000;
+const PREWARM_TIMEOUT_MS = 4000;
 
 /**
  * 负面缓存只用于「接口明确回答这个条目没有封面」这种确定性结论。
@@ -67,7 +77,6 @@ function request(urlStr, opts = {}, attempt = 0, hostSwitches = 0, forceTimeout 
     retries = 2,
     delayMs = null
   } = opts;
-  const pref = currentPref();
   /*
    * 重试时**换一个 API 域名**。
    * 实测某些网络环境（开着加速器也只代理了 steamcommunity）下 api.steampowered.com
@@ -78,23 +87,18 @@ function request(urlStr, opts = {}, attempt = 0, hostSwitches = 0, forceTimeout 
   const u = new URL(url);
   const apiUrl = isApiUrl(urlStr);
   /*
-   * 超时策略（只对 **API 请求** 生效：图片下载几 MB，本来就慢，不能拿探测超时去卡它）：
-   *   已知可用域名却在回头试另一个 → 短（只是"万一它恢复了"）
-   *   还没被证实健康的域名         → 中等（探测；超时说明它当下不对劲，换域名）
-   *   已证实健康的域名             → 正常
+   * 超时策略故意做得**简单**：
+   *   主域名（API_HOSTS[0]）→ 5 秒快速失败。它是已知的坏点：不可用时要 21 秒才 ECONNRESET，
+   *                          用 12 秒等它等于让用户白等十几秒。
+   *   其它任何候选            → 12 秒。可能是"排在第一位的备用域名"（主域名已被记为坏），
+   *                          它当前要 5~8 秒才响应 —— 用 5 秒会把它误杀（这个坑踩过）。
+   *   图片下载                → 沿用调用方给的正常超时（几 MB，本来就慢）。
    */
-  const effectiveTimeout =
-    forceTimeout != null
-      ? forceTimeout
-      : apiUrl
-        ? pickTimeout({
-            host: u.hostname,
-            pref,
-            normalMs: timeoutMs,
-            probeMs: PROBE_TIMEOUT_MS,
-            staleMs: STALE_HOST_TIMEOUT_MS
-          })
-        : timeoutMs;
+  const effectiveTimeout = apiUrl
+    ? u.hostname === API_HOSTS[0]
+      ? FIRST_ATTEMPT_TIMEOUT_MS
+      : Math.max(timeoutMs, API_ATTEMPT_TIMEOUT_MS)
+    : timeoutMs;
 
   /*
    * 超时用真实计时器竞速（见下面 timer 的注释）。
@@ -118,34 +122,29 @@ function request(urlStr, opts = {}, attempt = 0, hostSwitches = 0, forceTimeout 
     const again = () => {
       clear(); // 换域名/退避重试之前先撤掉本次的超时
       /*
-       * ① 还有另一个域名没试过 → 换过去（短超时，见 pickTimeout）
-       */
-      if (hostSwitches + 1 < API_HOSTS.length) {
-        resolve(request(urlStr, { ...opts, delayMs: 250 }, attempt + 1, hostSwitches + 1, null));
-        return;
-      }
-      /*
-       * ② 两个域名都探测过了（都是短超时）→ 最后来一次**宽松超时**的收尾尝试。
+       * API 请求：**只换一次域名**，换完再失败就老实报错。
        *
-       * 这一段是为"两个域名同时抽风"准备的：只有 4 秒探测超时的话，双慢 = 双失败，
-       * 用户看到的就是"打不开、要重试"（实测某一轮 5 个请求全挂）。
-       * 多给一次机会，慢但能响应的请求就有救；真连不上那只能失败 —— 那是网络的事，不是代码的。
+       * 不做"多轮探测 + 收尾尝试"那种花活：实测两个域名会一起抽风，多试只是让用户等更久。
+       * 真正省时间的是**把坏域名记下来**（noteResult → 30 分钟冷却，且会落盘），
+       * 这样从第二个请求起就直接走能用的那个，不再每条都先浪费一次超时。
        */
-      if (hostSwitches < API_HOSTS.length) {
-        resolve(
-          request(
-            urlStr,
-            { ...opts, delayMs: 0 },
-            attempt + 1,
-            hostSwitches + 1,
-            Math.max(timeoutMs, FINAL_TRY_TIMEOUT_MS)
-          )
-        );
+      if (apiUrl) {
+        if (hostSwitches + 1 < candidateCount()) {
+          // 换个域名前先把这次的失败记下来（下次就不会再优先试它）
+          noteResult(u.hostname, false);
+          savePref();
+          resolve(request(urlStr, opts, attempt + 1, hostSwitches + 1, null));
+          return;
+        }
+        /*
+         * 这里**不记失败**：最后一个候选也失败，通常说明是整体网络断了/抽风，
+         * 而不是"这个域名坏了"。把它记成坏的会造成 30 分钟内没有候选可用 ——
+         * 表现就是每个请求都直接失败（这个坑踩过）。
+         */
+        reject(new Error('请求超时'));
         return;
       }
-      /*
-       * ③ 收尾也失败了 → 按次数退避重试（只在非 API 请求上会走到，API 请求到这里就老实失败）
-       */
+      // 非 API（图片等）：按次数退避重试
       const wait = delayMs == null ? 800 * (attempt + 1) : delayMs;
       sleep(wait).then(
         () => resolve(request(urlStr, opts, attempt + 1, hostSwitches, null)),
@@ -175,6 +174,9 @@ function request(urlStr, opts = {}, attempt = 0, hostSwitches = 0, forceTimeout 
           }
           // 这个域名能用 → 记住它，后续请求直接走它（否则每次都要先等主域名超时）
           remember(u.hostname);
+          // 记下"这次成功了"，并清掉它之前的失败记录
+          noteResult(u.hostname, true);
+          savePref();
           // 只有"这次成功得够快"才算健康；慢响应不记，下次仍用短超时探测它
           noteTiming(u.hostname, Date.now() - startedAt);
           let buf = Buffer.concat(chunks);
@@ -471,6 +473,53 @@ function createQueue(concurrency, delayMs) {
 }
 
 /**
+ * 轻量探测：问一个 API 域名"在不在"（超小响应的公开端点）。
+ * 给 steamapi.prewarmHttp 用：并行问两个域名，先答的记为可用，省掉冷启动那次顺序探测。
+ */
+function probeHost(host, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const req = https.get(
+      {
+        hostname: host,
+        port: 443,
+        path: '/ISteamWebAPIUtil/GetServerInfo/v1/',
+        headers: { 'User-Agent': UA, Accept: 'application/json' }
+      },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode >= 200 && res.statusCode < 300));
+      }
+    );
+    req.on('error', () => resolve(false));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * 应用启动时调一次：并行探一次两个 API 域名，把先答上来的记为偏好。
+ * 不阻塞、失败无所谓 —— 正常请求流程有自己的回退。
+ */
+function prewarmApiHosts() {
+  try {
+    prewarmHttp(probeHost, PREWARM_TIMEOUT_MS);
+  } catch {
+    /* 探测嘛，失败就算了 */
+  }
+}
+
+/** 启动时读回上次记录的"哪个域名坏了"（见 steamapi.loadPref） */
+function loadApiHostPref(dir) {
+  try {
+    loadPref(dir);
+  } catch {
+    /* 读不到就当没有记录 */
+  }
+}
+
+/**
  * 仅供测试：临时把 https 换成假实现，跑完自动还原。
  * 用来验证"主域名失败时会改用备用域名"这条真实行为（而不是只测工具函数）。
  */
@@ -489,6 +538,9 @@ async function __withHttps(fake, fn) {
 module.exports = {
   request,
   __withHttps,
+  prewarmApiHosts,
+  loadApiHostPref,
+  probeHost,
   fetchDetails,
   fetchLocalizedDetails,
   getWorkshopDetails,

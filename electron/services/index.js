@@ -71,7 +71,9 @@ const {
   cachedPreview,
   missFresh,
   writeMiss,
-  createQueue
+  createQueue,
+  prewarmApiHosts,
+  loadApiHostPref
 } = require('./steam');
 const {
   autoCategorize,
@@ -311,6 +313,15 @@ function send(sender, channel, payload) {
 }
 
 function registerIpc() {
+  /*
+   * 启动时：
+   *   1. 读回上次记录的"哪个 API 域名坏了"（否则重启后第一个请求又要白等一次超时）；
+   *   2. 并行探一次两个域名，把先答上来的记为偏好。
+   * 都不阻塞启动、失败也无所谓 —— 正常请求流程有自己的回退。
+   */
+  loadApiHostPref(userDataDir());
+  prewarmApiHosts();
+
   /* -------------------------------- 设置 -------------------------------- */
 
   ipcMain.handle('settings:get', () => getSettings());
