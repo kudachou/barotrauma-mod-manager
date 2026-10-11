@@ -404,3 +404,26 @@ export interface BackupResult {
   folders: string[];
   skipped: { id: string; name: string; reason: string }[];
 }
+
+/**
+ * 工坊版自更新检测结果（`updater:workshopCheck`）。
+ * 纯本地读取：在工坊目录里找带 bmm-app.json 标记的条目，比对版本号。
+ */
+export interface WorkshopUpdateInfo {
+  /** 有没有真的查（没检测到工坊目录时为 false） */
+  checked: boolean;
+  /** 工坊里有没有找到本程序的条目（没订阅就是 false） */
+  found: boolean;
+  /** 工坊条目 id */
+  id: string | null;
+  /** 工坊里那份的目录（用户重装时从这里取） */
+  dir: string | null;
+  /** 工坊里那份的版本号 */
+  workshopVersion: string | null;
+  /** 当前运行的版本号 */
+  currentVersion: string;
+  /** 工坊里那份比当前新 → 该提示重装 */
+  newer: boolean;
+  /** 没更新时说明原因（已是最新 / 没订阅 / 版本号无法比较） */
+  reason?: string | null;
+}

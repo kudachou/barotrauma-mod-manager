@@ -38,6 +38,11 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 700,
     backgroundColor: '#080e1a',
+    /*
+     * 只是**初始**标题。页面加载后 HTML 的 <title> 会覆盖它，而渲染层会按界面语言
+     * 设 document.title（见 src/App.tsx）—— 所以多语言的标题由渲染层负责，
+     * 这里写死中文只是为了窗口出现的第一瞬间不至于空白。
+     */
     title: '潜渊症 Mod 管理器',
     autoHideMenuBar: true,
     webPreferences: {

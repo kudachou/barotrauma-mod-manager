@@ -4,6 +4,15 @@ node_modules/
 # 构建产物
 dist/
 release/
+# 创意工坊版单独一个输出目录（两条构建线分开，避免交替打包时互相覆盖 win-unpacked）
+release-ws/
+
+# 构建期临时目录（NSIS 要往里写；见 scripts/build-full.cjs 的说明）
+.bmm-build-tmp/
+
+# 变体标记：由 scripts/build-workshop.cjs 构建时生成、结束即删。
+# 万一构建中断留下，也绝不能提交 —— 它会让完整版把自己当成创意工坊版。
+app-variant.json
 
 # 自检 / 预览产物（截图见 docs/）
 shots/

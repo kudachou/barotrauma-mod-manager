@@ -26,7 +26,9 @@
     "build": "vite build",
     "start": "electron .",
     "app": "vite build && electron .",
-    "pack": "vite build && electron-builder"
+    "pack": "vite build && electron-builder",
+    "pack:full": "node scripts/build-full.cjs",
+    "pack:workshop": "node scripts/build-workshop.cjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
@@ -50,7 +52,9 @@
     },
     "files": [
       "electron/**/*",
-      "dist/**/*"
+      "dist/**/*",
+      "package.json",
+      "!electron-builder*.yml"
     ],
     "icon": "build/icon.ico",
     "win": {

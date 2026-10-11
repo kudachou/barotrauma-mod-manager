@@ -37,6 +37,7 @@ const {
   uniqueFileName
 } = require('./share');
 const { registerUpdaterIpc } = require('./updater');
+const { checkForWorkshopUpdate } = require('./workshopupdate');
 const { copyDir } = require('./fsutil');
 const {
   getRelations,
@@ -52,6 +53,8 @@ const {
   isDelisted
 } = require('./workshopsync');
 const { getApiKey, setApiKey } = require('./apikey');
+const { features, DISABLED_REASON } = require('./variant');
+const { setUiLang, uiLang, mt } = require('./uilang');
 const {
   listSnapshots,
   snapshotSummary,
@@ -86,6 +89,18 @@ const {
 
 const previewQueue = createQueue(5, 150);
 const previewInflight = new Set();
+
+/**
+ * 当前变体提供哪些功能（和渲染层 src/features.ts 同源）。
+ * 主进程用它做 IPC 守卫：界面藏起来只是不给入口，通道还在，边界必须落在这一侧。
+ */
+const FEATURES = features();
+
+/**
+ * 这个变体有没有"工坊下架检查"。
+ * 创意工坊版没有：它依赖 Steam Web API Key（没 Key 时只能抓网页，分不清"已下架"和"设为私有"，不可靠）。
+ */
+const delistedCheck = FEATURES.delistedCheck;
 
 const COVER_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'];
 
@@ -244,7 +259,12 @@ function scanAll() {
     m.usedIn = usedIn.get(key) || [];
     // 工坊 mod：条目本身还在不在；本地 mod：它对应的工坊来源还在不在
     const entry = m.source === 'workshop' ? checks[m.id] : checks[m.steamworkshopid];
-    m.delisted = isDelisted(checks, m.source === 'workshop' ? m.id : m.steamworkshopid);
+    /*
+     * 创意工坊版没有"下架检查"（它依赖 Web API Key），所以直接恒为 false：
+     * 徽章、筛选、「只备份已下架的」那几处 UI 也都由 features.delistedCheck 关掉了，
+     * 这里保持一致，免得数据里冒出一个界面不解释的状态。
+     */
+    m.delisted = delistedCheck ? isDelisted(checks, m.source === 'workshop' ? m.id : m.steamworkshopid) : false;
     // 判定依据：'apikey' = 官方接口确认下架；'page-invisible' = 抓网页只知道「工坊上看不到」，
     // 也可能只是作者把它设成了私有（实测这种误判真的会发生）
     m.delistedHow = m.delisted && entry ? entry.how || null : null;
@@ -291,11 +311,11 @@ function scanAll() {
     applied,
     relations: getRelations(userDataDir()),
     // 缓存太旧就让界面去刷一次（不阻塞扫描）
-    checksStale: checksStale(checks, checkIds),
+    checksStale: delistedCheck ? checksStale(checks, checkIds) : false,
     /** 已核实为下架的数量 */
-    checksDelisted: checkValues.filter((c) => c && c.exists === false).length,
+    checksDelisted: delistedCheck ? checkValues.filter((c) => c && c.exists === false).length : 0,
     /** 没能核实的数量（Steam 挡住时会有） */
-    checksUnknown: checkValues.filter((c) => c && c.exists === null).length,
+    checksUnknown: delistedCheck ? checkValues.filter((c) => c && c.exists === null).length : 0,
     /** 检查方式：有 API Key 走官方接口，没有就抓网页 */
     checksMode: getApiKey(userDataDir()) ? 'apikey' : 'page',
     checksCheckedAt: checkValues.reduce((max, c) => Math.max(max, (c && c.checkedAt) || 0), 0),
@@ -324,6 +344,16 @@ function registerIpc() {
 
   /* -------------------------------- 设置 -------------------------------- */
 
+  /*
+   * 渲染层把当前界面语言告诉主进程。
+   * 只有一类文案绕不过主进程：**原生文件/文件夹对话框的标题与筛选器名**（见 services/uilang.js）。
+   * 业务错误提示不走这里（那部分要改成错误码，见 src/i18n/mainMessages.ts）。
+   */
+  ipcMain.handle('app:setUiLang', (_e, lang) => {
+    setUiLang(lang);
+    return uiLang();
+  });
+
   ipcMain.handle('settings:get', () => getSettings());
   ipcMain.handle('settings:save', (_e, s) => {
     saveSettings(s);
@@ -335,7 +365,7 @@ function registerIpc() {
 
   ipcMain.handle('dialog:pickFolder', async (_e, title) => {
     const r = await dialog.showOpenDialog({
-      title: title || '选择文件夹',
+      title: title || mt('选择文件夹', 'Select a folder'),
       properties: ['openDirectory']
     });
     return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
@@ -343,7 +373,7 @@ function registerIpc() {
 
   ipcMain.handle('dialog:pickFile', async (_e, title, filters) => {
     const r = await dialog.showOpenDialog({
-      title: title || '选择文件',
+      title: title || mt('选择文件', 'Select a file'),
       properties: ['openFile'],
       filters: Array.isArray(filters) && filters.length ? filters : undefined
     });
@@ -405,11 +435,19 @@ function registerIpc() {
           ? buildShareText(name, entries, { note })
           : buildShareXml(name, entries);
     const r = await dialog.showSaveDialog({
-      title: '导出合集',
+      title: mt('导出合集', 'Export collection'),
       defaultPath: suggestFileName(name, fmt),
       filters: [
-        { name: fmt === 'xml' ? '游戏合集文件' : fmt === 'json' ? 'JSON' : '文本', extensions: [fmt] },
-        { name: '全部文件', extensions: ['*'] }
+        {
+          name:
+            fmt === 'xml'
+              ? mt('游戏合集文件', 'Game collection file')
+              : fmt === 'json'
+                ? 'JSON'
+                : mt('文本', 'Text'),
+          extensions: [fmt]
+        },
+        { name: mt('全部文件', 'All files'), extensions: ['*'] }
       ]
     });
     if (r.canceled || !r.filePath) return { ok: false, canceled: true };
@@ -574,14 +612,16 @@ function registerIpc() {
 
   /* ------------------------------ 工坊详情 ------------------------------ */
 
-  ipcMain.handle('workshop:details', (_e, id, force) =>
-    getWorkshopDetails(numId(id), path.join(userDataDir(), 'workshop'), {
+  ipcMain.handle('workshop:details', (_e, id, force) => {
+    // 这条走 IPublishedFileService，需要 Key ⇒ 创意工坊版关掉
+    if (!FEATURES.browseWorkshop) throw new Error(DISABLED_REASON);
+    return getWorkshopDetails(numId(id), path.join(userDataDir(), 'workshop'), {
       force: !!force,
       // 配了 key 就拿**本地化（中文）**描述 —— 老接口永远只给英文，这就是
       // 「管理器显示英文、Steam 显示中文」的原因
       apiKey: getApiKey(userDataDir())
-    })
-  );
+    });
+  });
 
   /** 把描述翻译成中文（作者没提供中文版时的兜底） */
   ipcMain.handle('translate:text', (_e, text) =>
@@ -589,16 +629,23 @@ function registerIpc() {
   );
 
   /** 联网刷新「工坊条目还在不在」的缓存（作者下架后就查不到了） */
-  ipcMain.handle('workshop:refreshChecks', () =>
-    refreshChecks(userDataDir(), collectCheckIds(getSettings()), {
+  ipcMain.handle('workshop:refreshChecks', () => {
+    if (!FEATURES.delistedCheck) throw new Error(DISABLED_REASON);
+    return refreshChecks(userDataDir(), collectCheckIds(getSettings()), {
       apiKey: getApiKey(userDataDir())
-    })
-  );
+    });
+  });
 
   /* ---------------------- Steam Web API Key ---------------------- */
 
-  ipcMain.handle('steam:getApiKey', () => getApiKey(userDataDir()));
-  ipcMain.handle('steam:setApiKey', (_e, key) => setApiKey(userDataDir(), key));
+  ipcMain.handle('steam:getApiKey', () => {
+    if (!FEATURES.apiKey) return '';
+    return getApiKey(userDataDir());
+  });
+  ipcMain.handle('steam:setApiKey', (_e, key) => {
+    if (!FEATURES.apiKey) throw new Error(DISABLED_REASON);
+    return setApiKey(userDataDir(), key);
+  });
 
   ipcMain.handle('cover:set', async (_e, sourceId, imagePath) => {    const key = String(sourceId || '');
     if (!key) return null;
@@ -606,9 +653,11 @@ function registerIpc() {
     let src = imagePath ? String(imagePath) : null;
     if (!src) {
       const r = await dialog.showOpenDialog({
-        title: '选择封面图片',
+        title: mt('选择封面图片', 'Choose a cover image'),
         properties: ['openFile'],
-        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }]
+        filters: [
+          { name: mt('图片', 'Images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }
+        ]
       });
       if (r.canceled || !r.filePaths.length) return null;
       src = r.filePaths[0];
@@ -705,7 +754,26 @@ function registerIpc() {
 
   /* -------------------------------- 更新 -------------------------------- */
 
-  registerUpdaterIpc(ipcMain);
+  /*
+   * 自更新只在完整版注册。
+   * 创意工坊版的更新走另一条路：用户订阅我们的工坊条目 → Steam 把新版下载进
+   * workshop\content\602960\<id>\ → 程序启动时比较那份里的版本号，提示重装。
+   * 两条通道同时开会让版本号漂移，所以工坊版直接把 electron-updater 关掉。
+   */
+  if (FEATURES.autoUpdater) registerUpdaterIpc(ipcMain);
+
+  /* ------------------------- 工坊版：检测工坊里的新版 ------------------------- */
+  /*
+   * 创意工坊版的自更新：Steam 把新版下载进 workshop\content\602960\<条目 id>\，
+   * 但不会覆盖已经装到桌面/用户目录的那份，所以这里只负责**检测并提示**。
+   * 纯本地文件读取：不联网、不需要 Web API Key。
+   * 完整版也注册这个通道（返回找到/没找到），但界面不会显示 —— 它走 electron-updater。
+   */
+  ipcMain.handle('updater:workshopCheck', () => {
+    const s = getSettings();
+    const contentDir = s.workshopModsDir || '';
+    return checkForWorkshopUpdate(contentDir, app.getVersion());
+  });
 
   /* ------------------------------- 启动游戏 ------------------------------- */
 
@@ -902,20 +970,32 @@ function registerIpc() {
   );
 
   /* ---------------------------- 浏览创意工坊 ---------------------------- */
+  /*
+   * 下面这些都要 Steam Web API Key，创意工坊版整块关掉。
+   * 守卫放在主进程（而不是只隐藏界面）：界面藏起来只是不给入口，IPC 通道还在，
+   * 直接调用仍会跑到这里 —— 边界必须落在主进程这一侧。
+   */
 
-  ipcMain.handle('workshop:browse', (_e, params) =>
-    browseWorkshop(params || {}, { key: getApiKey(userDataDir()) })
-  );
+  ipcMain.handle('workshop:browse', (_e, params) => {
+    if (!FEATURES.browseWorkshop) throw new Error(DISABLED_REASON);
+    return browseWorkshop(params || {}, { key: getApiKey(userDataDir()) });
+  });
 
   /** 分类标签：从接口结果里统计出来，不硬编码 */
-  ipcMain.handle('workshop:browseTags', () =>
-    browseWorkshopTags({ key: getApiKey(userDataDir()) })
-  );
+  ipcMain.handle('workshop:browseTags', () => {
+    if (!FEATURES.browseWorkshop) throw new Error(DISABLED_REASON);
+    return browseWorkshopTags({ key: getApiKey(userDataDir()) });
+  });
 
   /** 浏览页详情：工坊条目页面里的封面与截图（截图那个接口不给，只能读页面） */
-  ipcMain.handle('workshop:media', (_e, id, force) =>
-    getWorkshopMedia(numId(id), { cacheDir: path.join(userDataDir(), 'workshop-pages'), force: !!force })
-  );
+  ipcMain.handle('workshop:media', (_e, id, force) => {
+    // 只服务于「浏览工坊」页 ⇒ 工坊版一并关掉
+    if (!FEATURES.browseWorkshop) throw new Error(DISABLED_REASON);
+    return getWorkshopMedia(numId(id), {
+      cacheDir: path.join(userDataDir(), 'workshop-pages'),
+      force: !!force
+    });
+  });
 }
 
 module.exports = { registerIpc, scanAll, app };

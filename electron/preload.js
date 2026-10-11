@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('api', {
   // settings
   getSettings: () => invoke('settings:get'),
   saveSettings: (s) => invoke('settings:save', s),
+  /*
+   * 把界面语言告诉主进程：原生文件/文件夹对话框的标题只能由主进程交给系统，
+   * 渲染层给不了。见 electron/services/uilang.js。
+   */
+  setUiLang: (lang) => invoke('app:setUiLang', lang),
   pickFolder: (title) => invoke('dialog:pickFolder', title),
   pickFile: (title, filters) => invoke('dialog:pickFile', title, filters),
   pathExists: (p) => invoke('fs:exists', p),
@@ -111,10 +116,14 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // 更新
-  updaterStatus: () => invoke('updater:status'),
-  updaterCheck: () => invoke('updater:check'),
+  updaterStatus: () => invoke('updater:status'),  updaterCheck: () => invoke('updater:check'),
   updaterDownload: () => invoke('updater:download'),
   updaterInstall: () => invoke('updater:install'),
+  /*
+   * 工坊版专用：检测 Steam 工坊目录里下载进来的那份是不是比当前新。
+   * 纯本地文件读取（不联网、不需要 API Key），完整版调用会得到 found:false。
+   */
+  workshopUpdateCheck: () => invoke('updater:workshopCheck'),
   onUpdaterEvent: (cb) => {
     const handler = (_e, state) => cb(state);
     ipcRenderer.on('updater:event', handler);

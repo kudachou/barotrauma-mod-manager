@@ -1,0 +1,51 @@
+# 创意工坊版的 electron-builder 覆盖配置。
+#
+# 用法：`node scripts/build-workshop.cjs`（它会设 BMM_VARIANT、构建前端、写变体标记，
+# 再调 electron-builder --config 本文件）。也可以手工：
+#   $env:BMM_VARIANT='workshop'; npx vite build
+#   npx electron-builder --config electron-builder.workshop.yml
+#
+# 这里**只写差异**，其余继承 package.json 的 build 字段（electron-builder 会合并）。
+# 差异都是为了让工坊版能和完整版**并存安装**：
+#   - appId 不同     → 两者各用各的用户数据目录与卸载项，不会互相覆盖
+#   - productName 带后缀 → 快捷方式、安装目录一眼能区分
+#   - artifactName 带 workshop → 同一个 GitHub Release 下两个附件不重名
+#
+# extraResources：把变体标记放进 resources/。打包后 main 进程读不到构建期的
+# BMM_VARIANT 环境变量，只能靠这个落盘标记判断自己是不是工坊版
+#（见 electron/services/variant.js 的说明）。
+
+appId: com.example.barotraumamodmanager.workshop
+productName: 潜渊症Mod管理器 创意工坊版
+
+# 这一项必须重写：用 --config 指定覆盖文件时，directories 不是合并而是**替换**，
+# 不写的话产物会掉进 dist\（那正是前端构建的输出目录），和 dist/assets 混在一起。
+#
+# 用 release-ws 而不是和完整版共用 release：两边的 win-unpacked 是同名目录，
+# 交替打包时 electron-builder 要先把旧的删掉才能换新的（实测会被"另一个进程占用/拒绝访问"卡住）。
+# 分开之后两条构建线互不干扰，这也是工坊版能和完整版**并存**的同一个思路。
+directories:
+  output: release-ws
+
+# ⚠️ files 也必须在这里重写一遍。
+# 只靠 package.json 的 `build.files` 时，实测打出来的 app.asar 有 35 MB ——
+# 里面混进了 shots\（界面截图 17MB）、7 个 tmp-*-ui\（自检临时产物 12MB）、docs\、src\、
+# pnpm-lock.yaml、tsconfig.json，甚至 tc.log。这些都不该出现在给用户的东西里：
+# 既白占体积，也把开发期的目录结构和内部文件暴露出去。
+# 下面这三条 = 运行真正需要的：
+#   electron/**  主进程与 preload
+#   dist/**      前端构建产物
+#   package.json 版本号（app.getVersion() 要读它）
+files:
+  - electron/**/*
+  - dist/**/*
+  - package.json
+  - '!electron-builder*.yml'
+
+extraResources:
+  - from: app-variant.json
+    to: app-variant.json
+
+nsis:
+  shortcutName: 潜渊症 Mod 管理器（创意工坊版）
+  artifactName: barotrauma-mod-manager-workshop-setup-${version}.exe
