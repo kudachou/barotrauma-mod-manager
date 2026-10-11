@@ -124,6 +124,11 @@ contextBridge.exposeInMainWorld('api', {
    * 纯本地文件读取（不联网、不需要 API Key），完整版调用会得到 found:false。
    */
   workshopUpdateCheck: () => invoke('updater:workshopCheck'),
+  /*
+   * 一键升级：运行工坊条目里的安装包（`--updated --force-run`），覆盖已装的程序。
+   * 成功返回后主进程会延时退出，安装包装完自动把新版拉起来。
+   */
+  workshopUpdateApply: () => invoke('updater:workshopApply'),
   onUpdaterEvent: (cb) => {
     const handler = (_e, state) => cb(state);
     ipcRenderer.on('updater:event', handler);

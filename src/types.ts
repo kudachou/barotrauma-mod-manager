@@ -422,8 +422,25 @@ export interface WorkshopUpdateInfo {
   workshopVersion: string | null;
   /** 当前运行的版本号 */
   currentVersion: string;
-  /** 工坊里那份比当前新 → 该提示重装 */
+  /** 工坊里那份比当前新 → 该提示升级 */
   newer: boolean;
+  /**
+   * 能不能"一键升级"：只在有更新、且工坊条目里找得到可用安装包时为 true。
+   * 为 false 时界面只提示、不给按钮（比如条目里漏放了安装包）。
+   */
+  installerAvailable?: boolean;
   /** 没更新时说明原因（已是最新 / 没订阅 / 版本号无法比较） */
   reason?: string | null;
+}
+
+/** `updater:workshopApply` 的返回：一键升级的结果 */
+export interface WorkshopApplyResult {
+  ok: boolean;
+  /** 失败原因（成功时不带） */
+  reason?: string;
+  /** 实际运行的安装包路径 */
+  installer?: string;
+  installerVersion?: string;
+  /** 传给安装包的参数（`--updated --force-run`） */
+  args?: string[];
 }

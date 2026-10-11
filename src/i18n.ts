@@ -190,9 +190,14 @@ const baseZh = {
   'card.delistedTipNeedBackup': '已确认从工坊下架，而 LocalMods 里还没有备份 —— 建议马上备份',
 
   // ------------------------------ 更新提示 ------------------------------
-  'updater.workshopTitle': '工坊已下载新版本 v{version}',
+  'updater.workshopTitle': '工坊已更新到 v{version}',
   'updater.workshopBody':
-    '（当前运行的是 v{current}）Steam 把新版下在了工坊目录里，但不会覆盖你已经装好的这份。在工坊页面重新订阅/更新后，跑一次安装包即可升级。',
+    '（当前运行 v{current}）升级包已经在工坊目录里了，点一下就会自动升级并重启，不用手动换文件。',
+  'updater.workshopApplyNow': '立即升级',
+  'updater.workshopApplyingShort': '正在升级…',
+  'updater.workshopApplying': '正在升级，程序马上会关闭，装完自动重开新版…',
+  'updater.workshopApplyFailed': '升级没能启动',
+  'updater.workshopNoInstaller': '工坊条目里没找到可用的升级包（可能还没下载完），稍后重启程序再试。',
   'updater.showPath': '看下载位置',
   'updater.hidePath': '收起',
   'updater.dismiss': '这次不提示',
@@ -352,9 +357,16 @@ const baseEn: Record<keyof typeof baseZh, string> = {
   'card.delistedTipNeedBackup':
     'Confirmed removed from the Workshop and there is no backup in LocalMods yet — back it up now',
 
-  'updater.workshopTitle': 'Workshop downloaded v{version}',
+  'updater.workshopTitle': 'Workshop updated to v{version}',
   'updater.workshopBody':
-    '(currently running v{current}) Steam downloaded the new version into the Workshop folder, but it does not overwrite the copy you installed. Re-subscribe / update on the Workshop page, then run the installer again to upgrade.',
+    '(currently running v{current}) The upgrade package is already in the Workshop folder — one click updates and restarts the app, no need to replace files by hand.',
+  'updater.workshopApplyNow': 'Update now',
+  'updater.workshopApplyingShort': 'Updating…',
+  'updater.workshopApplying':
+    'Updating — the app will close now and reopen the new version automatically…',
+  'updater.workshopApplyFailed': 'Could not start the upgrade',
+  'updater.workshopNoInstaller':
+    'No usable upgrade package in the Workshop item yet (the download may still be running). Restart the app later and try again.',
   'updater.showPath': 'Show download location',
   'updater.hidePath': 'Hide',
   'updater.dismiss': 'Do not show again'

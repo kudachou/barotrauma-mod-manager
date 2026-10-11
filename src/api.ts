@@ -27,7 +27,8 @@ import type {
   BrowseTagsResult,
   WorkshopMedia,
   WorkshopSort,
-  WorkshopUpdateInfo
+  WorkshopUpdateInfo,
+  WorkshopApplyResult
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -450,6 +451,12 @@ const mockApi = {
     workshopVersion: null,
     currentVersion: '',
     newer: false,
+    installerAvailable: false,
+    reason: '预览模式'
+  }),
+  // 预览模式没有安装包可跑，直接拒绝（也不该真的去跑安装程序）
+  workshopUpdateApply: async (): Promise<WorkshopApplyResult> => ({
+    ok: false,
     reason: '预览模式'
   }),
 

@@ -1568,6 +1568,115 @@ async function tail() {
       `重名时往后找空位，不覆盖已有合集（实际 ${share.uniqueFileName(dir16, '联机.xml')}）`
     );
     ok(share.uniqueFileName(dir16, '新的.xml') === '新的.xml', '不重名时保持原名');
+
+    /*
+     * 19. 工坊版自更新：找条目、比版本、挑安装包
+     *
+     * 全是纯函数（只读目录），不联网、不启动任何安装程序。
+     * applyWorkshopUpdate 会真的 spawn 安装包，所以**不在这里调**。
+     */
+    console.log('\n[19] 工坊版自更新（检测与安装包选择）');
+    const wu = require('../electron/services/workshopupdate');
+
+    const wsRoot = path.join(TMP, 'ws-content-602960');
+    fs.mkdirSync(wsRoot, { recursive: true });
+
+    /** 造一个工坊条目目录；installer 传版本号就放一个够大的假安装包 */
+    function makeItem(id, markerVersion, installerVersion) {
+      const dir = path.join(wsRoot, id);
+      fs.mkdirSync(dir, { recursive: true });
+      if (markerVersion) {
+        fs.writeFileSync(
+          path.join(dir, 'bmm-app.json'),
+          JSON.stringify({ app: 'barotrauma-mod-manager', variant: 'workshop', version: markerVersion }),
+          'utf8'
+        );
+      }
+      if (installerVersion) {
+        const exe = path.join(dir, `barotrauma-mod-manager-workshop-setup-${installerVersion}.exe`);
+        // findInstaller 会拒绝 <1MB 的文件（防 Steam 下到一半），所以这里必须够大
+        fs.writeFileSync(exe, Buffer.alloc(1024 * 1024 + 1, 7));
+      }
+      return dir;
+    }
+
+    // 别人的条目（没有我们的标记文件）要被忽略，数字目录名是工坊 id 的形态
+    makeItem('111111111', null, null);
+    const notOurs = wu.findPublishedApp(wsRoot);
+    ok(!notOurs.found, '没有 bmm-app.json 的条目不算我们的（不会误认别人的 mod）');
+
+    // 标记文件里 app 字段不对也要忽略 —— 防止别人的标记文件被误认
+    const wrongApp = path.join(wsRoot, '222222222');
+    fs.mkdirSync(wrongApp, { recursive: true });
+    fs.writeFileSync(path.join(wrongApp, 'bmm-app.json'), JSON.stringify({ app: 'other', version: '9.9.9' }), 'utf8');
+    ok(!wu.findPublishedApp(wsRoot).found, 'app 字段不是本程序的标记文件要被忽略');
+
+    // 我们自己的条目
+    const ourDir = makeItem('333333333', '0.4.3', '0.4.3');
+    const hit = wu.findPublishedApp(wsRoot);
+    ok(hit.found && hit.id === '333333333', `认出我们自己的条目（实际 ${hit.id}）`);
+    ok(hit.dir === ourDir, '返回条目目录，供升级时取安装包');
+
+    // 非数字目录名跳过（工坊 id 一定是数字）
+    const weird = path.join(wsRoot, 'not-an-id');
+    fs.mkdirSync(weird, { recursive: true });
+    fs.writeFileSync(path.join(weird, 'bmm-app.json'), JSON.stringify({ app: 'barotrauma-mod-manager', version: '9.9.9' }), 'utf8');
+    const scannedHit = wu.findPublishedApp(path.join(TMP, 'ws-content-weird'));
+    fs.mkdirSync(path.join(TMP, 'ws-content-weird'), { recursive: true });
+    fs.cpSync(weird, path.join(TMP, 'ws-content-weird', 'not-an-id'), { recursive: true });
+    ok(!wu.findPublishedApp(path.join(TMP, 'ws-content-weird')).found, '非数字目录名跳过（只认工坊 id 形态的目录）');
+    ok(scannedHit.scanned === 0, '非数字目录不计入扫描数');
+
+    // 版本比较 + 能不能一键升级
+    const up = wu.checkForWorkshopUpdate(wsRoot, '0.4.2');
+    ok(up.newer === true, '工坊 0.4.3 > 当前 0.4.2 → 提示升级');
+    ok(up.installerAvailable === true, '条目里有安装包 → 可以一键升级');
+    ok(up.workshopVersion === '0.4.3', '回报工坊版本号');
+
+    const same = wu.checkForWorkshopUpdate(wsRoot, '0.4.3');
+    ok(same.newer === false, '版本相同 → 不提示');
+    ok(same.installerAvailable === false, '没有更新时不给"一键升级"按钮');
+
+    // 条目里漏放安装包：能提示更新，但不能给按钮（否则点了必然失败）
+    const noExe = path.join(TMP, 'ws-noexe');
+    fs.mkdirSync(noExe, { recursive: true });
+    const noExeItem = path.join(noExe, '444444444');
+    fs.mkdirSync(noExeItem, { recursive: true });
+    fs.writeFileSync(path.join(noExeItem, 'bmm-app.json'), JSON.stringify({ app: 'barotrauma-mod-manager', version: '0.5.0' }), 'utf8');
+    const noExeRes = wu.checkForWorkshopUpdate(noExe, '0.4.2');
+    ok(noExeRes.newer === true, '有新版就提示（即使没有安装包）');
+    ok(noExeRes.installerAvailable === false, '条目里没安装包 → installerAvailable=false（界面不给按钮）');
+
+    // 目录不存在当成"没订阅"，不报错（用户可能还没订阅）
+    const missing = wu.checkForWorkshopUpdate(path.join(TMP, 'nope-does-not-exist'), '0.4.2');
+    ok(missing.checked === true && missing.found === false, '工坊目录不存在时不报错，当成没订阅');
+    ok(wu.checkForWorkshopUpdate('', '0.4.2').checked === false, '没检测到工坊目录时 checked=false');
+
+    // findInstaller：版本精确匹配优先，其次退回第一个
+    ok(wu.findInstaller(ourDir, '0.4.3').version === '0.4.3', '安装包版本匹配时选它');
+    ok(wu.findInstaller(ourDir, '9.9.9').version === '0.4.3', '标记版本与包名不一致时仍退回可用安装包（能装比版本严格对齐重要）');
+    ok(wu.findInstaller(ourDir, null).version === '0.4.3', '不传版本号也能找到安装包');
+
+    // 残缺安装包要拒绝：Steam 下到一半 / 磁盘满会留下空壳，拿去静默安装会失败得很莫名
+    const tinyDir = path.join(TMP, 'ws-tiny');
+    fs.mkdirSync(tinyDir, { recursive: true });
+    fs.writeFileSync(path.join(tinyDir, 'barotrauma-mod-manager-workshop-setup-0.4.3.exe'), 'x', 'utf8');
+    ok(wu.findInstaller(tinyDir, '0.4.3') === null, '残缺安装包（<1MB）拒绝使用');
+
+    // 没有安装包 / 目录不存在都返回 null，不抛
+    ok(wu.findInstaller(path.join(TMP, 'nope-dir'), '1.0.0') === null, '目录不存在时返回 null，不抛异常');
+    ok(wu.findInstaller(tinyDir, '0.4.3') === null, '只有小文件时返回 null');
+
+    // 多版本共存时选标记文件声明的那个（工坊更新后旧包可能还在）
+    const multiDir = path.join(TMP, 'ws-multi');
+    fs.mkdirSync(multiDir, { recursive: true });
+    for (const v of ['0.4.2', '0.4.3']) {
+      fs.writeFileSync(
+        path.join(multiDir, `barotrauma-mod-manager-workshop-setup-${v}.exe`),
+        Buffer.alloc(1024 * 1024 + 1, 3)
+      );
+    }
+    ok(wu.findInstaller(multiDir, '0.4.3').version === '0.4.3', '多个安装包时选标记文件声明的版本');
   } catch (e) {
     console.log('\nEXCEPTION: ' + (e && e.stack ? e.stack : e));
     failures++;

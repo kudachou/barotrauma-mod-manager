@@ -37,7 +37,7 @@ const {
   uniqueFileName
 } = require('./share');
 const { registerUpdaterIpc } = require('./updater');
-const { checkForWorkshopUpdate } = require('./workshopupdate');
+const { checkForWorkshopUpdate, applyWorkshopUpdate } = require('./workshopupdate');
 const { copyDir } = require('./fsutil');
 const {
   getRelations,
@@ -765,7 +765,7 @@ function registerIpc() {
   /* ------------------------- 工坊版：检测工坊里的新版 ------------------------- */
   /*
    * 创意工坊版的自更新：Steam 把新版下载进 workshop\content\602960\<条目 id>\，
-   * 但不会覆盖已经装到桌面/用户目录的那份，所以这里只负责**检测并提示**。
+   * 但不会覆盖已经装到桌面/用户目录的那份，所以需要自己升级。
    * 纯本地文件读取：不联网、不需要 Web API Key。
    * 完整版也注册这个通道（返回找到/没找到），但界面不会显示 —— 它走 electron-updater。
    */
@@ -773,6 +773,26 @@ function registerIpc() {
     const s = getSettings();
     const contentDir = s.workshopModsDir || '';
     return checkForWorkshopUpdate(contentDir, app.getVersion());
+  });
+
+  /*
+   * 一键升级：运行工坊条目里的安装包（`--updated --force-run`），覆盖已装的程序。
+   *
+   * 先让 IPC 把结果回给渲染层（界面要显示"正在更新"），再延时退出。
+   * 退出这一步其实不是必需的 —— NSIS 的升级分支会处理正在运行的实例 ——
+   * 但主动退更干净，也避免安装过程中界面还开着。
+   */
+  ipcMain.handle('updater:workshopApply', () => {
+    const s = getSettings();
+    const r = checkForWorkshopUpdate(s.workshopModsDir || '', app.getVersion());
+    if (!r.newer || !r.dir) return { ok: false, reason: '没有可用的更新' };
+
+    const applied = applyWorkshopUpdate({ itemDir: r.dir, version: r.workshopVersion });
+    if (applied.ok) {
+      // 给渲染层一点时间把"正在更新"显示出来
+      setTimeout(() => app.quit(), 900);
+    }
+    return applied;
   });
 
   /* ------------------------------- 启动游戏 ------------------------------- */
