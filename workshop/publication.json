@@ -1,0 +1,33 @@
+{
+  "app_id": 602960,
+  "id": "3817971486",
+  "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3817971486",
+  "previous_ids": ["3817941004"],
+  "title": "潜渊症 Mod 管理器（创意工坊版）",
+  "title_en": "Barotrauma Mod Manager (Workshop Edition)",
+  "version": "0.4.2",
+  "visibility": "public",
+  "upload_confirmed": true,
+  "languages": ["chinese", "english"],
+  "program_languages": ["zh", "en"],
+  "tags": ["QOL", "Client-side"],
+  "executable": "barotrauma-mod-manager-workshop-setup-0.4.2.exe",
+  "executable_sha256": "bb25363f863053624731c4f758f08e6f764b50b2b900d93d6bc0a7605e65154b",
+  "cover": {
+    "zh": "cover/cover.zh.png",
+    "en": "cover/cover.en.png",
+    "width": 800,
+    "height": 800
+  },
+  "notes": [
+    "id 由**游戏**在上传成功后写回本地 filelist.xml 的 steamworkshopid —— 我们只是把它记下来",
+    "仓库里的 filelist.xml 必须带上同一个 id，否则下次上传会**又新建一个条目**而不是更新它",
+    "★ 2026-10-12：第二次发布**新建**了 3817971486 而没更新 3817941004。",
+    "  原因：上传界面缓存了内容包（打开界面时 filelist 里还没有/还是旧 id）。",
+    "  教训：改完 filelist.xml 后**重开上传界面**（或重启游戏）再发布，否则它会用缓存的旧清单。",
+    "  3817941004 是废弃的重复条目，应当删掉。",
+    "previous_ids：曾经用过、现已废弃的条目 id。脚本据此认得出\"这是我们自己的旧 id\"，",
+    "  从而允许把游戏目录里的 filelist.xml 从旧 id 改成新 id；同时不影响护栏拦住真正属于别人的条目。",
+    "executable_sha256 每次换包都要更新：Get-FileHash <exe> -Algorithm SHA256"
+  ]
+}

@@ -1,0 +1,5 @@
+# 安装包不要提交：上架时用 workshop/make-item-folder.cjs 组装到 release-ws/workshop-item/，
+# 那里已经被外面的 .gitignore 忽略。这个规则是防止手动拷贝时误提交 78MB 的 exe。
+*.exe
+*.exe.blockmap
+latest.yml
