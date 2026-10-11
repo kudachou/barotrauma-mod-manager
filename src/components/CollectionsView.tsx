@@ -3,6 +3,8 @@ import type { AppliedInfo, ModInfo, ModlistEntry, ModlistFull, ModlistSummary } 
 import { api, imgSrc, placeholderHue } from '../api';
 import { compareBadge, initials, safeFileName, uniq } from '../ui';
 import { categoryStyle } from '../categories';
+import { getLang, t } from '../i18n';
+import { categoryLabel } from '../i18n/categories';
 import {
   IconAlert,
   IconCheck,
@@ -82,16 +84,16 @@ export default function CollectionsView({
     try {
       const r = await api.openWorkshopInSteam(id);
       if (r && r.ok) {
-        onToast('info', '已在 Steam 里打开', '订阅并下载完成后，回到这里点顶栏「同步到游戏」');
+        onToast('info', t('collections.openedInSteam'), t('collections.openedInSteamHint'));
         return;
       }
       throw new Error((r && r.error) || '打不开 Steam');
     } catch {
       try {
         await api.getWorkshopPage(id);
-        onToast('info', '已用浏览器打开工坊页面', '订阅后回到这里点顶栏「同步到游戏」');
+        onToast('info', t('collections.openedInBrowser'), t('collections.openedInBrowserHint'));
       } catch (e2: any) {
-        onToast('err', '打不开工坊页面', String(e2?.message || e2));
+        onToast('err', t('collections.openWorkshopFailed'), String(e2?.message || e2));
       }
     }
   }
@@ -219,7 +221,7 @@ export default function CollectionsView({
       if (!skipRefresh) await onRefresh();
       return true;
     } catch (e: any) {
-      onToast('err', '保存合集失败', String(e?.message || e));
+      onToast('err', t('collections.saveFailed'), String(e?.message || e));
       return false;
     }
   }
@@ -237,25 +239,35 @@ export default function CollectionsView({
 
       const missing: string[] = (r && r.missing) || [];
       const pruned: string[] = (r && r.prunedBackups) || [];
-      const pruneNote = pruned.length ? `，并清理了 ${pruned.length} 个旧备份` : '';
+      const pruneNote = pruned.length ? t('collections.pruneNote', { n: pruned.length }) : '';
       if (missing.length) {
-        const head = missing.slice(0, 3).join('、');
+        const head = missing.slice(0, 3).join(t('common.listSeparator'));
         onToast(
           'warn',
-          `已应用，但有 ${missing.length} 个 mod 游戏还没安装`,
-          `${head}${missing.length > 3 ? ' 等' : ''} —— 启动游戏后会自动安装，本次已照常写入${pruneNote}`
+          t('collections.applyMissingTitle', { n: missing.length }),
+          t('collections.applyMissingBody', {
+            head,
+            etc: missing.length > 3 ? t('collections.etc') : '',
+            prune: pruneNote
+          })
         );
       } else if (r && r.changed === false) {
-        onToast('ok', '已应用到游戏', `游戏里的配置本来就是这个合集，没有改动文件${pruneNote}`);
+        onToast(
+          'ok',
+          t('collections.appliedTitle'),
+          t('collections.appliedUnchanged', { prune: pruneNote })
+        );
       } else {
         onToast(
           'ok',
-          '已应用到游戏',
-          r?.backupName ? `原配置已备份为 ${r.backupName}（每次应用覆盖同一个）${pruneNote}` : '下次启动游戏即生效'
+          t('collections.appliedTitle'),
+          r?.backupName
+            ? t('collections.appliedBackup', { name: r.backupName, prune: pruneNote })
+            : t('collections.appliedNextLaunch')
         );
       }
     } catch (e: any) {
-      onToast('err', '应用失败', String(e?.message || e));
+      onToast('err', t('collections.applyFailed'), String(e?.message || e));
     }
   }
 
@@ -270,7 +282,7 @@ export default function CollectionsView({
       await onRefresh();
       setSelectedFile(fileName);
     } catch (e: any) {
-      onToast('err', '创建合集失败', String(e?.message || e));
+      onToast('err', t('collections.createFailed'), String(e?.message || e));
     }
   }
 
@@ -282,9 +294,9 @@ export default function CollectionsView({
         setCurrent(null);
       }
       await onRefresh();
-      onToast('ok', '已删除合集', name);
+      onToast('ok', t('collections.deleted'), name);
     } catch (e: any) {
-      onToast('err', '删除失败', String(e?.message || e));
+      onToast('err', t('collections.deleteFailed'), String(e?.message || e));
     }
   }
 
@@ -308,14 +320,14 @@ export default function CollectionsView({
       <div className="list-panel">
         <div className="list-head">
           <IconLayers size={15} />
-          <h3>全部合集</h3>
+          <h3>{t('collections.allTitle')}</h3>
           <span className="spacer" />
-          <button className="btn icon sm" title="新建合集" onClick={() => setCreating(true)}>
+          <button className="btn icon sm" title={t('collections.newTip')} onClick={() => setCreating(true)}>
             <IconPlus size={14} />
           </button>
           <button
             className="btn icon sm"
-            title="从文件或朋友发来的文字导入合集"
+            title={t('collections.importTip')}
             onClick={() => setShareMode('import')}
           >
             <IconDownload size={14} />
@@ -327,7 +339,7 @@ export default function CollectionsView({
             <input
               className="input"
               style={{ height: 32, marginBottom: 8 }}
-              placeholder="合集名称…"
+              placeholder={t('collections.namePlaceholder')}
               autoFocus
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -338,10 +350,10 @@ export default function CollectionsView({
             />
             <div className="btn-row">
               <button className="btn sm primary" onClick={createList}>
-                创建
+                {t('collections.create')}
               </button>
               <button className="btn sm" onClick={() => setCreating(false)}>
-                取消
+                {t('common.cancel')}
               </button>
             </div>
           </div>
@@ -353,20 +365,24 @@ export default function CollectionsView({
             <div
               className={`list-row applied-row ${selectedFile === APPLIED ? 'active' : ''}`}
               onClick={() => setSelectedFile(APPLIED)}
-              title="读自 config_player.xml，即游戏现在真正加载的 mod"
+              title={t('collections.appliedRowTip')}
             >
               <div className="list-row-name">
                 <IconPlay size={13} />
                 <span
                   style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                 >
-                  游戏当前应用
+                  {t('collections.appliedPageTitle')}
                 </span>
               </div>
               <div className="list-row-sub">
-                {applied.available ? `${applied.keys.length} 个 mod` : '读不到配置'}
+                {applied.available
+                  ? t('collections.modCount', { n: applied.keys.length })
+                  : t('collections.configUnreadable')}
                 {applied.available && applied.missing.length > 0 && (
-                  <span className="badge st-different">{applied.missing.length} 个缺失</span>
+                  <span className="badge st-different">
+                    {t('collections.missingCount', { n: applied.missing.length })}
+                  </span>
                 )}
               </div>
             </div>
@@ -374,7 +390,7 @@ export default function CollectionsView({
 
           {modlists.length === 0 && (
             <div className="empty" style={{ padding: 24 }}>
-              <div>还没有合集</div>
+              <div>{t('collections.noCollections')}</div>
             </div>
           )}
           {modlists.map((l) => (
@@ -398,8 +414,8 @@ export default function CollectionsView({
                 )}
               </div>
               <div className="list-row-sub">
-                {l.count} 个 mod
-                {l.matchesApplied && <span className="badge applied">当前应用</span>}
+                {t('collections.modCount', { n: l.count })}
+                {l.matchesApplied && <span className="badge applied">{t('collections.appliedBadge')}</span>}
               </div>
             </div>
           ))}
@@ -411,27 +427,27 @@ export default function CollectionsView({
         <div className="editor">
           <div className="editor-head">
             <IconPlay size={15} />
-            <h3 style={{ margin: 0, fontSize: 15 }}>游戏当前应用</h3>
+            <h3 style={{ margin: 0, fontSize: 15 }}>{t('collections.appliedPageTitle')}</h3>
             {applied?.available ? (
-              <span className="badge ver">{appliedRows.length} 个 mod</span>
+              <span className="badge ver">{t('collections.modCount', { n: appliedRows.length })}</span>
             ) : (
-              <span className="badge st-different">读不到配置</span>
+              <span className="badge st-different">{t('collections.configUnreadable')}</span>
             )}
             {applied && applied.missing.length > 0 && (
               <span className="badge st-different" title={applied.missing.join('\n')}>
-                <IconAlert size={11} /> {applied.missing.length} 个缺失
+                <IconAlert size={11} /> {t('collections.missingCount', { n: applied.missing.length })}
               </span>
             )}
             <span className="spacer" />
             {/* 列表看条数、卡片看封面 —— 只影响这里的显示方式 */}
-            <div className="seg" title="换个看法：紧凑列表 / 大卡片">
+            <div className="seg" title={t('collections.viewToggleTip')}>
               <button
                 className={appliedView === 'list' ? 'active' : ''}
                 onClick={() => changeAppliedView('list')}
                 aria-pressed={appliedView === 'list'}
               >
                 <IconViewList size={14} />
-                列表
+                {t('collections.viewList')}
               </button>
               <button
                 className={appliedView === 'card' ? 'active' : ''}
@@ -439,12 +455,12 @@ export default function CollectionsView({
                 aria-pressed={appliedView === 'card'}
               >
                 <IconViewCard size={14} />
-                大卡片
+                {t('collections.viewCard')}
               </button>
             </div>
             <button className="btn sm" onClick={() => void onRefresh()}>
               <IconRefresh size={14} />
-              刷新
+              {t('common.refresh')}
             </button>
           </div>
 
@@ -452,22 +468,19 @@ export default function CollectionsView({
             {!applied?.available ? (
               <div className="empty" style={{ padding: 40 }}>
                 <IconAlert size={28} />
-                <div className="empty-title">读不到游戏当前配置</div>
-                <div>{applied?.reason || '请到「设置」里确认 config_player.xml 的路径'}</div>
+                <div className="empty-title">{t('collections.appliedUnavailableTitle')}</div>
+                <div>{applied?.reason || t('collections.appliedPathHint')}</div>
               </div>
             ) : appliedRows.length === 0 ? (
               <div className="empty" style={{ padding: 40 }}>
                 <IconPlay size={28} />
-                <div className="empty-title">游戏当前只加载了原版内容</div>
-                <div>在任意合集里点「应用到游戏」，这里就会显示实际生效的 mod</div>
+                <div className="empty-title">{t('collections.appliedVanillaTitle')}</div>
+                <div>{t('collections.appliedVanillaHint')}</div>
               </div>
             ) : (
               /* 只读视图：说明固定在顶部，下面按选择渲染列表或大卡片（占满整行、自己滚动） */
               <div className="applied-body">
-                <div className="hint">
-                  这是游戏现在真正加载的 mod，按加载顺序排列（读自 config_player.xml）。
-                  这里是只读的，要改请回到对应合集里改完再应用。
-                </div>
+                <div className="hint">{t('collections.appliedHint')}</div>
                 {appliedView === 'card' ? (
                   /* 卡片：每张一条（左边缩略图 + 右边名字/版本），顺序用缩略图角标表示 */
                   <div className="mod-cards">
@@ -499,12 +512,12 @@ export default function CollectionsView({
                               <span
                                 className={`badge ${r.entry.type === 'local' ? 'src-local' : 'src-workshop'}`}
                               >
-                                {r.entry.type === 'local' ? '本地' : '工坊'}
+                                {r.entry.type === 'local' ? t('card.source.local') : t('card.source.workshop')}
                               </span>
                               {r.mod?.modVersion ? (
                                 <span className="badge ver">v{r.mod.modVersion}</span>
                               ) : (
-                                <span className="badge st-different">版本未知</span>
+                                <span className="badge st-different">{t('collections.versionUnknown')}</span>
                               )}
                               {cb && (
                                 <span className={`badge ${cb.cls}`}>
@@ -513,18 +526,19 @@ export default function CollectionsView({
                                   ) : cb.cls === 'st-none' ? null : (
                                     <IconAlert size={11} />
                                   )}
-                                  {cb.text}
+                                  {t(cb.key)}
                                 </span>
                               )}
-                              {!r.mod && <span className="badge st-different">未找到</span>}
+                              {!r.mod && <span className="badge st-different">{t('collections.notFound')}</span>}
                             </div>
                             {/* 分类标签：和 Mod 库一致，方便一眼看出这是什么类型的 mod */}
                             <div className="tile-meta">
+                              {/* ⚠️ 循环变量不能叫 t —— 会遮蔽 i18n 的 t()（CollectionsView 踩过一回） */}
                               {uniq([...(r.mod?.categories || []), ...(r.mod?.autoCategories || [])])
                                 .slice(0, 3)
-                                .map((t) => (
-                                  <span key={t} className="tag" style={categoryStyle(t)}>
-                                    {t}
+                                .map((tag) => (
+                                  <span key={tag} className="tag" style={categoryStyle(tag)}>
+                                    {categoryLabel(tag, getLang())}
                                   </span>
                                 ))}
                               {r.entry.type === 'workshop' && (
@@ -569,13 +583,13 @@ export default function CollectionsView({
                             <span
                               className={`badge ${r.entry.type === 'local' ? 'src-local' : 'src-workshop'}`}
                             >
-                              {r.entry.type === 'local' ? '本地' : '工坊'}
+                              {r.entry.type === 'local' ? t('card.source.local') : t('card.source.workshop')}
                             </span>
                             {r.mod?.modVersion && (
                               <span className="badge ver">v{r.mod.modVersion}</span>
                             )}
-                            {cb && <span className={`badge ${cb.cls}`}>{cb.text}</span>}
-                            {!r.mod && <span className="badge st-different">未找到</span>}
+                            {cb && <span className={`badge ${cb.cls}`}>{t(cb.key)}</span>}
+                            {!r.mod && <span className="badge st-different">{t('collections.notFound')}</span>}
                           </div>
                         </div>
                       </div>
@@ -599,36 +613,36 @@ export default function CollectionsView({
                 setDirty(true);
               }}
             />
-            <span className="badge ver">{entries.length} 个 mod</span>
-            {dirty && <span className="badge st-older">未保存</span>}
+            <span className="badge ver">{t('collections.modCount', { n: entries.length })}</span>
+            {dirty && <span className="badge st-older">{t('collections.unsaved')}</span>}
             {missingCount > 0 && (
-              <span className="badge st-different" title="有 mod 在当前目录中找不到">
-                <IconAlert size={11} /> {missingCount} 个缺失
+              <span className="badge st-different" title={t('collections.missingTip')}>
+                <IconAlert size={11} /> {t('collections.missingCount', { n: missingCount })}
               </span>
             )}
             <span className="spacer" />
             <button
               className="btn sm"
               onClick={() => setShareMode('export')}
-              title="导出这个合集（.xml 连没装本管理器的人也能用）"
+              title={t('collections.exportTip')}
             >
               <IconExternal size={14} />
-              导出
+              {t('collections.exportBtn')}
             </button>
             <button
               className="btn sm danger"
               onClick={() => deleteList(current.fileName, current.name)}
-              title="删除该合集"
+              title={t('collections.deleteTip')}
             >
               <IconTrash size={14} />
             </button>
             <button className="btn sm" onClick={() => void saveCurrent()} disabled={!dirty}>
               <IconSave size={14} />
-              保存
+              {t('common.save')}
             </button>
             <button className="btn primary" onClick={applyCurrent}>
               <IconPlay size={15} />
-              应用到游戏
+              {t('collections.applyBtn')}
             </button>
           </div>
 
@@ -645,29 +659,30 @@ export default function CollectionsView({
                 }}
               >
                 <IconGrip size={12} />
-                拖拽调整顺序（顺序即加载顺序，越靠下越后加载）
+                {t('collections.dragHint')}
                 <span className="spacer" />
                 {missingCount > 0 && (
                   <div
                     className={`tag-toggle ${onlyMissing ? 'on' : ''}`}
                     onClick={() => setOnlyMissing((v) => !v)}
-                    title="只看本机还没有的 mod —— 每个都能点『去订阅』打开工坊页面"
+                    title={t('collections.onlyMissingTip')}
                   >
-                    只看未订阅 {missingCount}
+                    {t('collections.onlyMissing', { n: missingCount })}
                   </div>
                 )}
               </div>
               {entries.length === 0 && (
                 <div className="empty" style={{ padding: 30 }}>
                   <IconLayers size={28} />
-                  <div className="empty-title">合集是空的</div>
-                  <div>从右侧列表点击添加 mod</div>
+                  <div className="empty-title">{t('collections.emptyTitle')}</div>
+                  <div>{t('collections.emptyHint')}</div>
                 </div>
               )}
               {missingCount > 0 && (
                 <div className="hint" style={{ marginBottom: 8 }}>
-                  {missingCount} 个 mod 本机还没有（没订阅 / 没下载 / 本地文件夹不在）。
-                  点每行的「<b>去订阅</b>」打开工坊页面订阅，下好后回到顶栏点「同步到游戏」装进游戏。
+                  {t('collections.missingHintA', { n: missingCount })}
+                  <b>{t('collections.subscribe')}</b>
+                  {t('collections.missingHintB')}
                 </div>
               )}
               {entries
@@ -719,25 +734,25 @@ export default function CollectionsView({
                       <div className="row-name">{m?.name || e.name || `#${e.id}`}</div>
                       <div className="row-sub">
                         <span className={`badge ${e.type === 'local' ? 'src-local' : 'src-workshop'}`}>
-                          {e.type === 'local' ? '本地' : '工坊'}
+                          {e.type === 'local' ? t('card.source.local') : t('card.source.workshop')}
                         </span>
                         {m?.modVersion && <span className="badge ver">v{m.modVersion}</span>}
-                        {cb && <span className={`badge ${cb.cls}`}>{cb.text}</span>}
-                        {!m && <span className="badge st-different">未找到</span>}
+                        {cb && <span className={`badge ${cb.cls}`}>{t(cb.key)}</span>}
+                        {!m && <span className="badge st-different">{t('collections.notFound')}</span>}
                       </div>
                     </div>
                     {!m && e.type === 'workshop' && e.id && (
                       <button
                         className="btn sm"
-                        title="在 Steam 里打开这个 mod 的工坊页面去订阅"
+                        title={t('collections.subscribeTip')}
                         onClick={() => openWorkshopPage(e.id as string)}
                       >
-                        去订阅
+                        {t('collections.subscribe')}
                       </button>
                     )}
                     <button
                       className="btn icon sm"
-                      title="移除"
+                      title={t('collections.removeTip')}
                       onClick={() => removeAt(i)}
                     >
                       <IconTrash size={14} />
@@ -753,7 +768,7 @@ export default function CollectionsView({
                 <div className="search" style={{ height: 32 }}>
                   <IconSearch size={14} />
                   <input
-                    placeholder="搜索并添加到合集…"
+                    placeholder={t('collections.pickerPlaceholder')}
                     value={pickerQ}
                     onChange={(e) => setPickerQ(e.target.value)}
                   />
@@ -774,7 +789,7 @@ export default function CollectionsView({
                         className={`badge ${m.source === 'local' ? 'src-local' : 'src-workshop'}`}
                         style={{ flex: 'none' }}
                       >
-                        {m.source === 'local' ? '本地' : '工坊'}
+                        {m.source === 'local' ? t('card.source.local') : t('card.source.workshop')}
                       </span>
                       <span className="pick-name">{m.name}</span>
                       {added ? <IconCheck size={14} /> : <IconPlus size={14} />}
@@ -789,8 +804,8 @@ export default function CollectionsView({
         <div className="editor">
           <div className="empty">
             <IconLayers size={36} />
-            <div className="empty-title">选择左侧的一个合集</div>
-            <div>或点击 + 新建一个合集 / 点 ⤓ 导入朋友发来的合集</div>
+            <div className="empty-title">{t('collections.selectTitle')}</div>
+            <div>{t('collections.selectHint')}</div>
           </div>
         </div>
       )}

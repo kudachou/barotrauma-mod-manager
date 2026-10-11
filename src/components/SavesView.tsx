@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ModlistEntry, ModlistSummary, SaveInfo, SaveList } from '../types';
 import { api } from '../api';
 import { safeFileName } from '../ui';
+import { t } from '../i18n';
 import { IconAlert, IconClock, IconPlay, IconRefresh, IconSave } from './Icons';
 
 /**
@@ -16,7 +17,7 @@ import { IconAlert, IconClock, IconPlay, IconRefresh, IconSave } from './Icons';
  */
 
 function fmtTime(ms: number): string {
-  if (!ms) return '时间未知';
+  if (!ms) return t('saves.timeUnknown');
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -40,12 +41,18 @@ function entriesFromSave(s: SaveInfo): { entries: ModlistEntry[]; skipped: strin
 /** 新建合集时取一个没被占用的名字，别把已有的合集覆盖掉 */
 function uniqueListName(base: string, existing: ModlistSummary[]): string {
   const taken = new Set(existing.map((l) => l.fileName));
-  const root = (base || '存档').trim() || '存档';
+  const fallback = t('saves.defaultListName');
+  const root = (base || fallback).trim() || fallback;
   for (let i = 0; i < 50; i++) {
-    const name = i === 0 ? root : i === 1 ? `${root}（存档）` : `${root}（存档 ${i}）`;
+    const name =
+      i === 0
+        ? root
+        : i === 1
+          ? t('saves.listNameDup', { root })
+          : t('saves.listNameDupN', { root, n: i });
     if (!taken.has(safeFileName(name))) return name;
   }
-  return `${root}（存档 ${Date.now()}）`;
+  return t('saves.listNameDupN', { root, n: Date.now() });
 }
 
 export default function SavesView({
@@ -72,7 +79,7 @@ export default function SavesView({
           cur && r.saves.some((s) => s.file === cur) ? cur : r.saves[0]?.file || null
         );
       } catch (e: any) {
-        onToast('err', '读存档失败', String(e?.message || e));
+        onToast('err', t('saves.loadFailed'), String(e?.message || e));
       } finally {
         setLoading(false);
       }
@@ -95,7 +102,7 @@ export default function SavesView({
     try {
       const l = await api.getModlist(fileName);
       if (!l) {
-        onToast('err', '找不到这个合集', fileName);
+        onToast('err', t('saves.listNotFound'), fileName);
         return;
       }
       const r = await api.applyModlist(l.name, l.entries);
@@ -103,13 +110,15 @@ export default function SavesView({
       const pruned = ((r && r.prunedBackups) || []).length;
       onToast(
         'ok',
-        `已应用「${name}」`,
+        t('saves.applied', { name }),
         `${
-          r?.backupName ? `原配置已备份为 ${r.backupName}（每次应用覆盖同一个）` : '下次启动游戏即生效'
-        }${pruned ? `，并清理了 ${pruned} 个旧备份` : ''}`
+          r?.backupName
+            ? t('saves.backupNote', { file: r.backupName })
+            : t('saves.effectiveNextLaunch')
+        }${pruned ? t('saves.prunedBackups', { n: pruned }) : ''}`
       );
     } catch (e: any) {
-      onToast('err', '应用失败', String(e?.message || e));
+      onToast('err', t('saves.applyFailed'), String(e?.message || e));
     } finally {
       setBusy(false);
     }
@@ -119,15 +128,16 @@ export default function SavesView({
   async function saveAsList(s: SaveInfo, alsoApply: boolean) {
     const { entries, skipped } = entriesFromSave(s);
     if (!entries.length) {
-      onToast('err', '没法建合集', '这个存档记录的 mod 现在一个都找不到');
+      onToast('err', t('saves.cannotCreateList'), t('saves.noModsForList'));
       return;
     }
     const name = uniqueListName(s.name, modlists);
     const fileName = safeFileName(name);
     const skipNote = skipped.length
-      ? `；${skipped.length} 个游戏里已经没有了，没法写入：${skipped.slice(0, 3).join('、')}${
-          skipped.length > 3 ? ' 等' : ''
-        }`
+      ? `${t('saves.skipNote', {
+          n: skipped.length,
+          names: skipped.slice(0, 3).join(t('common.listSeparator'))
+        })}${skipped.length > 3 ? t('saves.skipNoteMore') : ''}`
       : '';
     setBusy(true);
     try {
@@ -137,18 +147,26 @@ export default function SavesView({
         await onRefresh();
         onToast(
           'ok',
-          `已按存档启用（合集「${name}」）`,
-          `${entries.length} 个 mod 已写入${
-            r?.backupName ? `，原配置已备份为 ${r.backupName}` : ''
+          t('saves.enabledFromSave', { name }),
+          `${t('saves.writtenMods', { n: entries.length })}${
+            r?.backupName ? t('saves.backupNoteShort', { file: r.backupName }) : ''
           }${skipNote}`
         );
       } else {
         await onRefresh();
-        onToast('ok', `已存为新合集「${name}」`, `${entries.length} 个 mod${skipNote}`);
+        onToast(
+          'ok',
+          t('saves.savedAsList', { name }),
+          `${t('saves.modCount', { n: entries.length })}${skipNote}`
+        );
       }
       await load(true);
     } catch (e: any) {
-      onToast('err', alsoApply ? '启用失败' : '新建合集失败', String(e?.message || e));
+      onToast(
+        'err',
+        alsoApply ? t('saves.enableFailed') : t('saves.createListFailed'),
+        String(e?.message || e)
+      );
     } finally {
       setBusy(false);
     }
@@ -165,19 +183,19 @@ export default function SavesView({
             {s.name}
           </span>
           <span className={`badge ${s.source === 'multi' ? 'src-workshop' : 'src-local'}`}>
-            {s.source === 'multi' ? '多人' : '单机'}
+            {s.source === 'multi' ? t('saves.multiplayer') : t('saves.singleplayer')}
           </span>
         </div>
         <div className="list-row-sub">
-          {fmtTime(s.saveTime)} · {s.mods.length} 个 mod
+          {fmtTime(s.saveTime)} · {t('saves.modCount', { n: s.mods.length })}
           {s.match ? (
-            <span className="badge applied">完全一致</span>
+            <span className="badge applied">{t('saves.exactMatch')}</span>
           ) : s.covers.length ? (
             <span className="badge st-same" title={s.covers[0].name}>
-              「{s.covers[0].name}」覆盖
+              {t('saves.coversBadge', { name: s.covers[0].name })}
             </span>
           ) : (
-            <span className="badge st-different">没有对应合集</span>
+            <span className="badge st-different">{t('saves.noCollection')}</span>
           )}
         </div>
       </>
@@ -189,23 +207,23 @@ export default function SavesView({
       <div className="list-panel">
         <div className="list-head">
           <IconSave size={15} />
-          <h3 style={{ margin: 0, fontSize: 15 }}>存档</h3>
+          <h3 style={{ margin: 0, fontSize: 15 }}>{t('saves.title')}</h3>
           {data && <span className="badge ver">{data.saves.length}</span>}
           <span className="spacer" />
           <button className="btn sm" onClick={() => void load()} disabled={loading}>
             <IconRefresh size={14} />
-            {loading ? '读取中…' : '刷新'}
+            {loading ? t('saves.reading') : t('common.refresh')}
           </button>
         </div>
 
         <div className="list-scroll">
           {data && data.saves.length === 0 && (
             <div className="empty" style={{ padding: 24 }}>
-              <div>没找到存档</div>
+              <div>{t('saves.noneFound')}</div>
             </div>
           )}
 
-          {single.length > 0 && <div className="picker-head">单机存档</div>}
+          {single.length > 0 && <div className="picker-head">{t('saves.singleSaves')}</div>}
           {single.map((s) => (
             <div
               key={s.file}
@@ -216,7 +234,7 @@ export default function SavesView({
             </div>
           ))}
 
-          {multi.length > 0 && <div className="picker-head">多人存档</div>}
+          {multi.length > 0 && <div className="picker-head">{t('saves.multiSaves')}</div>}
           {multi.map((s) => (
             <div
               key={s.file}
@@ -234,7 +252,7 @@ export default function SavesView({
             <span
               style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
             >
-              {data.saveDir || '（读不到存档目录）'}
+              {data.saveDir || t('saves.dirUnavailable')}
             </span>
           </div>
         )}
@@ -244,11 +262,11 @@ export default function SavesView({
         <div className="editor">
           <div className="editor-head">
             <h3 style={{ margin: 0, fontSize: 15 }}>{current.name}</h3>
-            <span className="badge ver">{current.mods.length} 个 mod</span>
+            <span className="badge ver">{t('saves.modCount', { n: current.mods.length })}</span>
             {current.gameVersion && <span className="badge">v{current.gameVersion}</span>}
             {current.missingCount > 0 && (
               <span className="badge st-different">
-                <IconAlert size={11} /> {current.missingCount} 个游戏里没有
+                <IconAlert size={11} /> {t('saves.missingInGame', { n: current.missingCount })}
               </span>
             )}
             <span className="spacer" />
@@ -262,34 +280,34 @@ export default function SavesView({
                     (current.match || current.covers[0]).name
                   )
                 }
-                title="应用这个合集（它包含存档需要的全部 mod）"
+                title={t('saves.applyCollectionTip')}
               >
                 <IconPlay size={15} />
-                应用「{(current.match || current.covers[0]).name}」
+                {t('saves.applyCollection', { name: (current.match || current.covers[0]).name })}
               </button>
             )}
             <button className="btn" disabled={busy} onClick={() => void saveAsList(current, true)}>
-              按存档启用
+              {t('saves.enableFromSave')}
             </button>
             <button className="btn" disabled={busy} onClick={() => void saveAsList(current, false)}>
-              存为新合集
+              {t('saves.saveAsCollection')}
             </button>
           </div>
 
           <div className="editor-body">
             <div className="saves-body">
             <div className="hint">
-              存档时间 <b>{fmtTime(current.saveTime)}</b>
+              {t('saves.saveTimeLabel')}<b>{fmtTime(current.saveTime)}</b>
               {current.submarine ? (
                 <>
                   {' '}
-                  · 潜艇 <b>{current.submarine}</b>
+                  · {t('saves.submarineLabel')} <b>{current.submarine}</b>
                 </>
               ) : null}
               {current.gameVersion ? (
                 <>
                   {' '}
-                  · 游戏版本 <b>{current.gameVersion}</b>
+                  · {t('saves.gameVersionLabel')} <b>{current.gameVersion}</b>
                 </>
               ) : null}
               <br />
@@ -299,13 +317,24 @@ export default function SavesView({
             {/* 对应合集 */}
             {current.match ? (
               <div className="hint" style={{ marginTop: 10 }}>
-                ✅ 这个存档和合集「<b>{current.match.name}</b>」<b>完全一致</b> ——
-                直接点右上角「应用」即可。
+                {t('saves.exactMatchPre')}
+                <b>{current.match.name}</b>
+                {t('saves.exactMatchMid')}
+                <b>{t('saves.exactMatchBold')}</b>
+                {t('saves.exactMatchPost')}
               </div>
             ) : current.covers.length > 0 ? (
               <div className="hint" style={{ marginTop: 10 }}>
-                ◐ 合集「<b>{current.covers[0].name}</b>」<b>完全覆盖</b>了这个存档的{' '}
-                {current.mods.length} 个 mod（它另有 {current.covers[0].extra.length} 个）：
+                {t('saves.coversPre')}
+                <b>{current.covers[0].name}</b>
+                {t('saves.coversMid')}
+                <b>{t('saves.coversBold')}</b>
+                {t('saves.coversAfterBold')}
+                {' '}
+                {t('saves.coversModCount', {
+                  n: current.mods.length,
+                  extra: current.covers[0].extra.length
+                })}
                 <div style={{ marginTop: 6 }}>
                   {current.covers[0].extra.map((x) => (
                     <span className="badge" key={x} style={{ marginRight: 4, marginBottom: 4 }}>
@@ -314,13 +343,15 @@ export default function SavesView({
                   ))}
                 </div>
                 <div style={{ marginTop: 6 }}>
-                  多出来的这些多半是 <b>LuaCs 这类框架 / UI / QoL mod</b> ——
-                  <b>存档从不记录纯客户端型内容包</b>，所以它们不会出现在存档名单里。
-                  用这个合集实现存档是最稳的：只多不少。
+                  {t('saves.extraHintPre')}
+                  <b>{t('saves.extraHintBold')}</b>
+                  {t('saves.extraHintMid')}
+                  <b>{t('saves.extraHintBold2')}</b>
+                  {t('saves.extraHintPost')}
                 </div>
                 {current.covers.length > 1 && (
                   <div style={{ marginTop: 6 }}>
-                    另外还有 {current.coversTotal - 1} 个合集也能覆盖它：
+                    {t('saves.otherCovers', { n: current.coversTotal - 1 })}
                     {current.covers.slice(1).map((c) => (
                       <button
                         key={c.fileName}
@@ -329,7 +360,7 @@ export default function SavesView({
                         disabled={busy}
                         onClick={() => void applyExisting(c.fileName, c.name)}
                       >
-                        {c.name}（另有 {c.extra.length} 个）
+                        {t('saves.listExtraCount', { name: c.name, n: c.extra.length })}
                       </button>
                     ))}
                   </div>
@@ -337,16 +368,15 @@ export default function SavesView({
               </div>
             ) : (
               <div className="hint" style={{ marginTop: 10 }}>
-                ✗ 没有任何合集能覆盖它的全部 mod ——
+                {t('saves.noCoverPre')}
                 {current.missingCount > 0
-                  ? `其中 ${current.missingCount} 个 mod 游戏里已经没有了。`
-                  : '用「存为新合集」把这套配置保存下来吧。'}
+                  ? t('saves.someModsMissing', { n: current.missingCount })
+                  : t('saves.saveAsCollectionHint')}
               </div>
             )}
 
             <div className="hint" style={{ marginTop: 10 }}>
-              下面是存档记录的内容包（按加载顺序）。「按存档启用」只会写入这些 ——
-              存档不记录 LuaCs 这类客户端 mod，需要的话请对照上面的覆盖合集补上。
+              {t('saves.modListHint')}
             </div>
 
             <div className="mod-rows">
@@ -360,10 +390,12 @@ export default function SavesView({
                         <span
                           className={`badge ${m.mod.source === 'local' ? 'src-local' : 'src-workshop'}`}
                         >
-                          {m.mod.source === 'local' ? '本地' : '工坊'}
+                          {m.mod.source === 'local'
+                            ? t('library.source.local')
+                            : t('library.source.workshop')}
                         </span>
                       ) : (
-                        <span className="badge st-different">游戏里没有这个 mod</span>
+                        <span className="badge st-different">{t('saves.modMissingInGame')}</span>
                       )}
                     </div>
                   </div>
@@ -378,11 +410,18 @@ export default function SavesView({
           <div className="empty">
             <IconSave size={28} />
             <div className="empty-title">
-              {loading ? '正在读存档…' : data && data.saves.length ? '选择左侧的一个存档' : '没找到存档'}
+              {loading
+                ? t('saves.loadingSaves')
+                : data && data.saves.length
+                  ? t('saves.selectSave')
+                  : t('saves.noneFound')}
             </div>
             <div>
-              存档从 <b>config_player.xml 的 savepath</b> 指定的目录读取
-              {data?.saveDir ? `（${data.saveDir}）` : ''}。
+              {t('saves.readFromPre')}
+              <b>{t('saves.readFromBold')}</b>
+              {t('saves.readFromPost')}
+              {data?.saveDir ? t('saves.dirInParens', { dir: data.saveDir }) : ''}
+              {t('saves.sentenceEnd')}
             </div>
           </div>
         </div>

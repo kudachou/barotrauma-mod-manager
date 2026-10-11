@@ -3,11 +3,21 @@ import type { CategoryData, ModInfo } from '../types';
 import ModCard from './ModCard';
 import { IconAlert, IconDownload, IconSearch } from './Icons';
 import { categoryStyle } from '../categories';
+import { features } from '../features';
+import { getLang, t } from '../i18n';
+import { categoryLabel } from '../i18n/categories';
 
 type SortKey = 'name' | 'name-desc' | 'ver' | 'mtime';
 
 /** 分类筛选里的特殊项：没有任何标签的 mod */
 const UNCATEGORIZED = '__uncategorized__';
+/**
+ * 分类筛选里的"全部"。
+ *
+ * ⚠️ 必须和显示文案分开：以前这里直接拿 '全部' 当状态值，一做多语言就会散架
+ * —— 翻译后 `cat === '全部'` 永远不成立，筛选直接失效。凡是当**键**用的字符串都不能翻译。
+ */
+const ALL_CATS = '__all__';
 
 /** 「未分类」= 手动标签和关键词自动分类都为空（与卡片上的「未分类」徽章一致） */
 function isUncategorized(m: ModInfo): boolean {
@@ -30,7 +40,7 @@ export default function LibraryView({
 }) {
   const [q, setQ] = useState('');
   const [source, setSource] = useState<'all' | 'local' | 'workshop'>('all');
-  const [cat, setCat] = useState('全部');
+  const [cat, setCat] = useState(ALL_CATS);
   const [sort, setSort] = useState<SortKey>('name');
   const [onlyOutdated, setOnlyOutdated] = useState(false);
   const [onlyDelisted, setOnlyDelisted] = useState(false);
@@ -52,7 +62,7 @@ export default function LibraryView({
     }
     // 自定义分类是用户自己建的标签库，与来源无关，始终列出
     for (const c of categories.custom) s.add(c);
-    return ['全部', ...Array.from(s).sort((a, b) => a.localeCompare(b, 'zh'))];
+    return [ALL_CATS, ...Array.from(s).sort((a, b) => a.localeCompare(b, 'zh'))];
   }, [sourceMods, categories]);
 
   const outdatedCount = useMemo(
@@ -74,7 +84,7 @@ export default function LibraryView({
   const delistedAreInvisibleOnly =
     delistedCount > 0 &&
     sourceMods.filter((m) => m.delisted).every((m) => m.delistedHow === 'page-invisible');
-  const delistedLabel = delistedAreInvisibleOnly ? '工坊不可见' : '已下架';
+  const delistedLabel = delistedAreInvisibleOnly ? t('library.invisible') : t('library.delisted');
 
   /*
    * 筛选条件可能因为数据变化而「失效」：更新完就没有「有更新」的 mod 了，
@@ -84,13 +94,13 @@ export default function LibraryView({
    * （否则数据恢复后筛选会「自己」又生效）。
    */
   const effectiveCat =
-    cat === '全部' || cat === UNCATEGORIZED || catList.includes(cat) ? cat : '全部';
+    cat === ALL_CATS || cat === UNCATEGORIZED || catList.includes(cat) ? cat : ALL_CATS;
   const effectiveOnlyOutdated = onlyOutdated && outdatedCount > 0;
   const effectiveOnlyDelisted = onlyDelisted && delistedCount > 0;
 
   useEffect(() => {
     // UNCATEGORIZED 是个虚拟分类，不在 catList 里，别把它当成失效条件重置掉
-    if (cat !== '全部' && cat !== UNCATEGORIZED && !catList.includes(cat)) setCat('全部');
+    if (cat !== ALL_CATS && cat !== UNCATEGORIZED && !catList.includes(cat)) setCat(ALL_CATS);
   }, [cat, catList]);
 
   useEffect(() => {
@@ -105,7 +115,7 @@ export default function LibraryView({
     let out = mods;
     if (source !== 'all') out = out.filter((m) => m.source === source);
     if (effectiveCat === UNCATEGORIZED) out = out.filter(isUncategorized);
-    else if (effectiveCat !== '全部')
+    else if (effectiveCat !== ALL_CATS)
       out = out.filter(
         (m) => m.categories.includes(effectiveCat) || m.autoCategories.includes(effectiveCat)
       );
@@ -150,7 +160,7 @@ export default function LibraryView({
         <div className="search" style={{ width: 280 }}>
           <IconSearch size={16} />
           <input
-            placeholder="搜索 mod 名称 / 工坊 ID…"
+            placeholder={t('library.searchPlaceholder')}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -158,16 +168,16 @@ export default function LibraryView({
 
         <div className="seg">
           <button className={source === 'all' ? 'active' : ''} onClick={() => setSource('all')}>
-            全部 {mods.length}
+            {t('library.source.all')} {mods.length}
           </button>
           <button className={source === 'local' ? 'active' : ''} onClick={() => setSource('local')}>
-            本地 {localCount}
+            {t('library.source.local')} {localCount}
           </button>
           <button
             className={source === 'workshop' ? 'active' : ''}
             onClick={() => setSource('workshop')}
           >
-            工坊 {wsCount}
+            {t('library.source.workshop')} {wsCount}
           </button>
         </div>
 
@@ -175,22 +185,20 @@ export default function LibraryView({
           <button
             className={`btn sm ${effectiveOnlyOutdated ? 'primary' : ''}`}
             onClick={() => setOnlyOutdated((v) => !v)}
-            title="只看创意工坊有更新的本地 mod"
+            title={t('library.hasUpdateTip')}
           >
             <IconAlert size={13} />
-            有更新 {outdatedCount}
+            {t('library.hasUpdate')} {outdatedCount}
           </button>
         )}
 
-        {delistedCount > 0 && (
+        {/* 创意工坊版没有下架检查 ⇒ 「已下架」筛选与「只备份已下架的」入口一并去掉 */}
+        {features.delistedCheck && delistedCount > 0 && (
           <button
             className={`btn sm delisted-chip ${effectiveOnlyDelisted ? 'primary' : ''}`}
             onClick={() => setOnlyDelisted((v) => !v)}
             title={
-              delistedAreInvisibleOnly
-                ? '只看工坊上匿名看不到的 mod —— 可能是已下架，也可能是作者（或你自己）设成了私有。' +
-                  '在设置里填个 Steam API Key 就能准确区分'
-                : '只看已被作者从创意工坊下架的 mod —— 工坊上再也下不到了，建议备份到本地'
+              delistedAreInvisibleOnly ? t('library.invisibleTip') : t('library.delistedTip')
             }
           >
             <IconAlert size={13} />
@@ -198,14 +206,14 @@ export default function LibraryView({
           </button>
         )}
 
-        {effectiveOnlyDelisted && (
+        {features.delistedCheck && effectiveOnlyDelisted && (
           <button
             className="btn sm primary"
             onClick={() => onBackupDelisted()}
-            title="把这些已下架的 mod 复制进 LocalMods，之后不依赖工坊和 Steam"
+            title={t('library.backupTheseTip')}
           >
             <IconDownload size={13} />
-            一键备份这些
+            {t('library.backupThese')}
           </button>
         )}
 
@@ -215,14 +223,14 @@ export default function LibraryView({
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
         >
-          <option value="name">名称 A → Z</option>
-          <option value="name-desc">名称 Z → A</option>
-          <option value="ver">版本 高 → 低</option>
-          <option value="mtime">最近修改</option>
+          <option value="name">{t('library.sort.nameAsc')}</option>
+          <option value="name-desc">{t('library.sort.nameDesc')}</option>
+          <option value="ver">{t('library.sort.versionDesc')}</option>
+          <option value="mtime">{t('library.sort.mtime')}</option>
         </select>
 
         <span className="result-count">
-          {filtered.length} / {mods.length} 个 mod
+          {t('library.resultCount', { shown: filtered.length, total: mods.length })}
         </span>
       </div>
 
@@ -234,17 +242,21 @@ export default function LibraryView({
               <button
                 className={`tag-toggle ${on ? 'on' : ''}`}
                 onClick={() => setCat(c)}
-                style={on && c !== '全部' ? categoryStyle(c) : undefined}
+                style={on && c !== ALL_CATS ? categoryStyle(c) : undefined}
               >
-                {c}
+                {/*
+                  只翻**显示名**：`c` 本身是筛选用的键（也是用户 categories.json 里的主键），
+                  必须原样传给 setCat / categoryStyle，不能翻。
+                */}
+                {c === ALL_CATS ? t('common.all') : categoryLabel(c, getLang())}
               </button>
               {i === 0 && (
                 <button
                   className={`tag-toggle ${effectiveCat === UNCATEGORIZED ? 'on' : ''}`}
-                  onClick={() => setCat(effectiveCat === UNCATEGORIZED ? '全部' : UNCATEGORIZED)}
-                  title="只看还没有任何标签的 mod —— 新订阅的 mod 通常都在这里"
+                  onClick={() => setCat(effectiveCat === UNCATEGORIZED ? ALL_CATS : UNCATEGORIZED)}
+                  title={t('library.uncategorizedTip')}
                 >
-                  未分类 {uncategorizedCount}
+                  {t('common.uncategorized')} {uncategorizedCount}
                 </button>
               )}
             </Fragment>
@@ -268,8 +280,8 @@ export default function LibraryView({
       ) : filtered.length === 0 ? (
         <div className="empty">
           <IconSearch size={34} />
-          <div className="empty-title">没有匹配的 mod</div>
-          <div>试试清空搜索或切换筛选条件</div>
+          <div className="empty-title">{t('library.empty')}</div>
+          <div>{t('library.emptyHint')}</div>
         </div>
       ) : (
         <div className="grid">

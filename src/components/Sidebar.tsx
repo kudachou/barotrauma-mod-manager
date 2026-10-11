@@ -1,13 +1,18 @@
 import type { ViewKey } from '../types';
 import { IconAnchor, IconLayers, IconLibrary, IconSave, IconSearch, IconSettings } from './Icons';
-
-const ITEMS: { key: ViewKey; label: string; icon: (p: { size?: number }) => JSX.Element }[] = [
-  { key: 'library', label: 'Mod 库', icon: IconLibrary },
-  { key: 'browse', label: '浏览工坊', icon: IconSearch },
-  { key: 'collections', label: '合集', icon: IconLayers },
-  { key: 'saves', label: '存档', icon: IconSave },
-  { key: 'settings', label: '设置', icon: IconSettings }
+import { features } from '../features';
+import { t, type TKey } from '../i18n';
+/** labelKey 而不是写死文案：语言一变（App 用 key={lang} 重挂子树）就会重新求值 */
+const ITEMS: { key: ViewKey; labelKey: TKey; icon: (p: { size?: number }) => JSX.Element }[] = [
+  { key: 'library', labelKey: 'nav.library', icon: IconLibrary },
+  { key: 'browse', labelKey: 'nav.browse', icon: IconSearch },
+  { key: 'collections', labelKey: 'nav.collections', icon: IconLayers },
+  { key: 'saves', labelKey: 'nav.saves', icon: IconSave },
+  { key: 'settings', labelKey: 'nav.settings', icon: IconSettings }
 ];
+
+/** 创意工坊版没有「浏览工坊」（它需要 Web API Key），导航里整项去掉 */
+const VISIBLE_ITEMS = ITEMS.filter((it) => it.key !== 'browse' || features.browseWorkshop);
 
 export default function Sidebar({
   view,
@@ -29,13 +34,13 @@ export default function Sidebar({
           <IconAnchor size={21} />
         </div>
         <div>
-          <div className="brand-title">潜渊症 Mod</div>
-          <div className="brand-sub">BAROTRAUMA MANAGER</div>
+          <div className="brand-title">{t('sidebar.brandTitle')}</div>
+          <div className="brand-sub">{t('sidebar.brandSub')}</div>
         </div>
       </div>
 
       <nav className="nav">
-        {ITEMS.map((it) => {
+        {VISIBLE_ITEMS.map((it) => {
           const Icon = it.icon;
           return (
             <div
@@ -44,7 +49,7 @@ export default function Sidebar({
               onClick={() => onChange(it.key)}
             >
               <Icon size={18} />
-              <span>{it.label}</span>
+              <span>{t(it.labelKey)}</span>
               {it.key === 'library' && modCount > 0 && <span className="nav-badge">{modCount}</span>}
               {it.key === 'collections' && listCount > 0 && (
                 <span className="nav-badge">{listCount}</span>
@@ -57,9 +62,9 @@ export default function Sidebar({
       <div className="sidebar-foot">
         <div className={`mode-pill ${isMock ? '' : 'live'}`}>
           <span className="dot" />
-          {isMock ? '外观预览模式' : '已连接游戏目录'}
+          {isMock ? t('sidebar.mockMode') : t('sidebar.liveMode')}
         </div>
-        <div>{isMock ? '当前显示示例数据，未读写你的磁盘' : '数据来自你的本地 mod 目录'}</div>
+        <div>{isMock ? t('sidebar.mockHint') : t('sidebar.liveHint')}</div>
       </div>
     </aside>
   );

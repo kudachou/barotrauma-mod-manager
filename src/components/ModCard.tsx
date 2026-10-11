@@ -3,6 +3,9 @@ import type { ModInfo } from '../types';
 import { imgSrc, placeholderHue } from '../api';
 import { categoryStyle } from '../categories';
 import { compareBadge, initials, uniq } from '../ui';
+import { features } from '../features';
+import { t, getLang } from '../i18n';
+import { categoryLabel } from '../i18n/categories';
 import { IconAlert, IconCheck, IconDownload } from './Icons';
 
 export default function ModCard({ mod, onOpen }: { mod: ModInfo; onOpen: (m: ModInfo) => void }) {
@@ -30,46 +33,47 @@ export default function ModCard({ mod, onOpen }: { mod: ModInfo; onOpen: (m: Mod
         )}
         <div className="cover-badges">
           <span className={`badge ${mod.source === 'local' ? 'src-local' : 'src-workshop'}`}>
-            {mod.source === 'local' ? '本地' : '工坊'}
+            {mod.source === 'local' ? t('card.source.local') : t('card.source.workshop')}
           </span>
-          {mod.delisted && (
+          {/* 创意工坊版没有下架检查（它需要 Web API Key），不显示这个徽章 */}
+          {features.delistedCheck && mod.delisted && (
             <span
               className={`badge ${mod.backedUpLocally ? 'st-backup-ok' : 'st-delisted'}`}
               title={
                 mod.delistedHow === 'page-invisible'
-                  ? '工坊上匿名看不到这个条目 —— 可能是已下架，也可能是作者（或你自己）把它设成了私有。填一个 Steam API Key 就能准确区分'
+                  ? t('card.delistedTipInvisible')
                   : mod.source === 'local'
-                    ? '这个本地 mod 对应的工坊原版已被作者下架（本地副本本来就是安全的）'
+                    ? t('card.delistedTipLocal')
                     : mod.backedUpLocally
-                      ? '已确认从工坊下架，但 LocalMods 里已经有一份备份了 —— 已经安全'
-                      : '已确认从工坊下架，而 LocalMods 里还没有备份 —— 建议马上备份'
+                      ? t('card.delistedTipBackedUp')
+                      : t('card.delistedTipNeedBackup')
               }
             >
               {mod.delistedHow === 'page-invisible'
-                ? '工坊不可见'
+                ? t('card.invisible')
                 : mod.source === 'local'
-                  ? '工坊已下架'
+                  ? t('card.delisted')
                   : mod.backedUpLocally
-                    ? '已下架 · 已备份'
-                    : '已下架 · 待备份'}
+                    ? t('card.delistedBackedUp')
+                    : t('card.delistedPendingBackup')}
             </span>
           )}
           {mod.installPending && (
             <span
               className="badge st-older"
-              title={`Steam 已经下载好了这个更新（${
-                mod.installInstalledVersion
-                  ? `游戏里装的还是 v${mod.installInstalledVersion}`
-                  : '游戏里还没装过'
-              }），但游戏要你在 mod 列表里按更新键才会装。点顶部「同步到游戏」可以直接装好`}
+              title={t('card.installPendingTip', {
+                state: mod.installInstalledVersion
+                  ? t('card.installStateOld', { version: mod.installInstalledVersion })
+                  : t('card.installStateNone')
+              })}
             >
               <IconDownload size={11} />
-              待同步到游戏
+              {t('card.installPending')}
             </span>
           )}
           {mod.installedOnly && !mod.backedUpLocally && (
-            <span className="badge st-different" title="Steam 订阅目录里已经没有它，只剩游戏里这份副本">
-              仅剩游戏副本
+            <span className="badge st-different" title={t('card.onlyInstalledTip')}>
+              {t('card.onlyInstalled')}
             </span>
           )}
           {badge && (
@@ -79,7 +83,7 @@ export default function ModCard({ mod, onOpen }: { mod: ModInfo; onOpen: (m: Mod
               ) : badge.cls === 'st-none' ? null : (
                 <IconAlert size={11} />
               )}
-              {badge.text}
+              {t(badge.key)}
             </span>
           )}
         </div>
@@ -88,12 +92,14 @@ export default function ModCard({ mod, onOpen }: { mod: ModInfo; onOpen: (m: Mod
       <div className="card-body">
         <div className="card-name">{mod.name}</div>
         <div className="card-tags">
-          {tags.map((t) => (
-            <span key={t} className="tag" style={categoryStyle(t)}>
-              {t}
+          {/* ⚠️ 循环变量不能叫 t —— 会遮蔽 i18n 的 t() */}
+          {tags.map((tag) => (
+            <span key={tag} className="tag" style={categoryStyle(tag)}>
+              {/* 只翻显示名：tag 本身是数据主键，仍按原样匹配分类与配色 */}
+              {categoryLabel(tag, getLang())}
             </span>
           ))}
-          {tags.length === 0 && <span className="badge st-none">未分类</span>}
+          {tags.length === 0 && <span className="badge st-none">{t('common.uncategorized')}</span>}
         </div>
         <div className="card-meta">
           <span className="badge ver">v{mod.modVersion || '?'}</span>
@@ -103,8 +109,11 @@ export default function ModCard({ mod, onOpen }: { mod: ModInfo; onOpen: (m: Mod
             </span>
           )}
           {mod.usedIn.length > 0 && (
-            <span className="used-pill" title={`已用于：${mod.usedIn.join('、')}`}>
-              {mod.usedIn.length} 个合集
+            <span
+              className="used-pill"
+              title={t('card.usedInTip', { list: mod.usedIn.join(t('common.listSeparator')) })}
+            >
+              {t('card.usedInCount', { n: mod.usedIn.length })}
             </span>
           )}
         </div>

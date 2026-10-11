@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ModlistEntry } from '../types';
 import { api } from '../api';
+import { t } from '../i18n';
 import { IconAlert, IconCheck, IconClose, IconCopy, IconDownload, IconFolder } from './Icons';
 
 /**
@@ -56,12 +57,12 @@ export default function ShareModal({
     try {
       const r = await api.exportModlistFile(listName, entries, format, note.trim() || undefined);
       if (r && r.ok) {
-        onToast('ok', '已导出', r.path);
+        onToast('ok', t('modal.exported'), r.path);
       } else if (r && r.canceled) {
         /* 用户自己取消的，不提示 */
       }
     } catch (e: any) {
-      onToast('err', '导出失败', String(e?.message || e));
+      onToast('err', t('modal.exportFailed'), String(e?.message || e));
     } finally {
       setBusy(false);
     }
@@ -73,9 +74,9 @@ export default function ShareModal({
     try {
       const text = await api.exportModlistText(listName, entries, note.trim() || undefined);
       await navigator.clipboard.writeText(text);
-      onToast('ok', '已复制到剪贴板', '直接贴到聊天里发给朋友就行');
+      onToast('ok', t('modal.copiedToClipboard'), t('modal.copiedToClipboardMsg'));
     } catch (e: any) {
-      onToast('err', '复制失败', String(e?.message || e));
+      onToast('err', t('modal.copyFailed'), String(e?.message || e));
     } finally {
       setBusy(false);
     }
@@ -84,16 +85,16 @@ export default function ShareModal({
   async function pickAndPreview() {
     setBusy(true);
     try {
-      const p = await api.pickFile('选择要导入的合集（.xml / .json / .txt）', [
-        { name: '合集文件', extensions: ['xml', 'json', 'txt'] },
-        { name: '全部文件', extensions: ['*'] }
+      const p = await api.pickFile(t('modal.pickImportTitle'), [
+        { name: t('modal.filterModlistFiles'), extensions: ['xml', 'json', 'txt'] },
+        { name: t('modal.filterAllFiles'), extensions: ['*'] }
       ]);
       if (!p) return;
       const r = await api.previewImportModlist({ path: p });
       setPreview(r);
-      setImportName(r.name || '导入的合集');
+      setImportName(r.name || t('modal.defaultImportName'));
     } catch (e: any) {
-      onToast('err', '读不了这个文件', String(e?.message || e));
+      onToast('err', t('modal.cannotReadFile'), String(e?.message || e));
     } finally {
       setBusy(false);
     }
@@ -105,9 +106,9 @@ export default function ShareModal({
     try {
       const r = await api.previewImportModlist({ text: pasteText });
       setPreview(r);
-      setImportName(r.name || '导入的合集');
+      setImportName(r.name || t('modal.defaultImportName'));
     } catch (e: any) {
-      onToast('err', '认不出这段内容', String(e?.message || e));
+      onToast('err', t('modal.unrecognizedContent'), String(e?.message || e));
     } finally {
       setBusy(false);
     }
@@ -124,15 +125,17 @@ export default function ShareModal({
       });
       onToast(
         'ok',
-        `已导入「${r.name}」`,
-        `${r.count} 个 mod${applyAfter ? '，并已应用到游戏' : ''}${
-          preview.missingCount ? `；其中 ${preview.missingCount} 个本机还没有，去工坊订阅后点「同步到游戏」` : ''
+        t('modal.importedList', { name: r.name }),
+        `${t('modal.importedCount', { n: r.count })}${
+          applyAfter ? t('modal.importedApplied') : ''
+        }${
+          preview.missingCount ? t('modal.importedMissing', { n: preview.missingCount }) : ''
         }`
       );
       await onDone(r.fileName);
       onClose();
     } catch (e: any) {
-      onToast('err', '导入失败', String(e?.message || e));
+      onToast('err', t('modal.importFailed'), String(e?.message || e));
     } finally {
       setBusy(false);
     }
@@ -143,12 +146,14 @@ export default function ShareModal({
       <div className="modal" style={{ width: 'min(760px, 100%)' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div style={{ flex: 1 }}>
-            <div className="modal-title">合集分享</div>
+            <div className="modal-title">{t('modal.shareTitle')}</div>
             <div className="page-sub" style={{ marginTop: 4 }}>
-              联机时把整套 mod 配置发给朋友：导出的 <code>.xml</code> 连没装本管理器的人也能用。
+              {t('modal.shareSub1')}
+              <code>.xml</code>
+              {t('modal.shareSub2')}
             </div>
           </div>
-          <button className="btn icon" onClick={onClose} disabled={busy} title="关闭">
+          <button className="btn icon" onClick={onClose} disabled={busy} title={t('common.close')}>
             <IconClose size={16} />
           </button>
         </div>
@@ -156,10 +161,10 @@ export default function ShareModal({
         <div className="modal-body">
           <div className="browse-sorts" style={{ marginBottom: 12 }}>
             <div className={`tag-toggle ${tab === 'export' ? 'on' : ''}`} onClick={() => setTab('export')}>
-              导出合集
+              {t('modal.tabExport')}
             </div>
             <div className={`tag-toggle ${tab === 'import' ? 'on' : ''}`} onClick={() => setTab('import')}>
-              导入合集
+              {t('modal.tabImport')}
             </div>
           </div>
 
@@ -170,30 +175,41 @@ export default function ShareModal({
                   <div className="bk-stats">
                     <div className="bk-stat">
                       <div className="bk-num">{entries?.length || 0}</div>
-                      <div className="bk-label">个 mod</div>
+                      <div className="bk-label">{t('modal.statMods')}</div>
                     </div>
                     <div className="bk-stat">
                       <div className="bk-num">{wsCount}</div>
-                      <div className="bk-label">工坊</div>
+                      <div className="bk-label">{t('card.source.workshop')}</div>
                     </div>
                     <div className="bk-stat">
                       <div className="bk-num">{localCount}</div>
-                      <div className="bk-label">本地</div>
+                      <div className="bk-label">{t('card.source.local')}</div>
                     </div>
                   </div>
-                  <div className="section-title">「{listName}」</div>
+                  <div className="section-title">
+                    {t('modal.listNameQuoted', { name: listName })}
+                  </div>
 
                   <div className="hint" style={{ marginTop: 0 }}>
-                    导出的三种形态：
-                    <br />· <b>.xml</b> —— 游戏原生格式，<b>朋友不用装本管理器</b>，丢进
-                    <code>Barotrauma\ModLists\</code> 就能在游戏里选它
-                    <br />· <b>.json</b> —— 用本管理器的朋友导入时信息最全（连未订阅的 mod 也带名字和链接）
-                    <br />· <b>文本</b> —— 贴聊天里，每个工坊 mod 一行带链接，点开就能订阅
+                    {t('modal.exportFormatsIntro')}
+                    <br />
+                    · <b>.xml</b>
+                    {t('modal.xmlFormat1')}
+                    <b>{t('modal.xmlFormatBold')}</b>
+                    {t('modal.xmlFormat2')}
+                    <code>Barotrauma\ModLists\</code>
+                    {t('modal.xmlFormat3')}
+                    <br />
+                    · <b>.json</b>
+                    {t('modal.jsonFormat')}
+                    <br />
+                    · <b>{t('modal.textFormatBold')}</b>
+                    {t('modal.textFormat')}
                   </div>
 
                   <div className="search" style={{ height: 34, marginTop: 12 }}>
                     <input
-                      placeholder="附一句话给朋友（可选，会写进导出内容里）…"
+                      placeholder={t('modal.notePlaceholder')}
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
                     />
@@ -202,20 +218,20 @@ export default function ShareModal({
                   <div className="btn-row" style={{ marginTop: 12, flexWrap: 'wrap' }}>
                     <button className="btn primary" disabled={busy} onClick={() => void doExport('xml')}>
                       <IconDownload size={14} />
-                      导出 .xml（推荐）
+                      {t('modal.exportXml')}
                     </button>
                     <button className="btn" disabled={busy} onClick={() => void doExport('json')}>
                       <IconDownload size={14} />
-                      导出 .json
+                      {t('modal.exportJson')}
                     </button>
                     <button className="btn" disabled={busy} onClick={() => void copyText()}>
                       <IconCopy size={14} />
-                      复制成文本
+                      {t('modal.copyAsText')}
                     </button>
                   </div>
                 </>
               ) : (
-                <div className="bk-dim">先在左边选一个合集，再导出。</div>
+                <div className="bk-dim">{t('modal.pickListFirst')}</div>
               )}
             </>
           )}
@@ -225,25 +241,28 @@ export default function ShareModal({
               {!preview ? (
                 <>
                   <div className="hint" style={{ marginTop: 0 }}>
-                    可以选文件（<code>.xml</code> / <code>.json</code> / <code>.txt</code>），
-                    也可以直接把朋友发的文字<b>粘在下面</b> —— 哪怕只是一串工坊 id 也能认出来。
+                    {t('modal.importHint1')}
+                    <code>.xml</code> / <code>.json</code> / <code>.txt</code>
+                    {t('modal.importHint2')}
+                    <b>{t('modal.importHintBold')}</b>
+                    {t('modal.importHint3')}
                   </div>
                   <div className="btn-row" style={{ marginTop: 10 }}>
                     <button className="btn primary" disabled={busy} onClick={() => void pickAndPreview()}>
                       <IconFolder size={14} />
-                      选择文件…
+                      {t('modal.chooseFile')}
                     </button>
                   </div>
-                  <div className="section-title">或者粘贴内容</div>
+                  <div className="section-title">{t('modal.orPaste')}</div>
                   <textarea
                     className="share-paste"
-                    placeholder="把朋友发来的合集文字贴在这里…"
+                    placeholder={t('modal.pastePlaceholder')}
                     value={pasteText}
                     onChange={(e) => setPasteText(e.target.value)}
                   />
                   <div className="btn-row" style={{ marginTop: 8 }}>
                     <button className="btn" disabled={busy || !pasteText.trim()} onClick={() => void previewPasted()}>
-                      解析这段文字
+                      {t('modal.parseText')}
                     </button>
                   </div>
                 </>
@@ -252,23 +271,23 @@ export default function ShareModal({
                   <div className="bk-stats">
                     <div className="bk-stat">
                       <div className="bk-num">{preview.count}</div>
-                      <div className="bk-label">个 mod</div>
+                      <div className="bk-label">{t('modal.statMods')}</div>
                     </div>
                     <div className="bk-stat">
                       <div className="bk-num" style={{ color: preview.missingCount ? 'var(--warn)' : undefined }}>
                         {preview.missingCount}
                       </div>
-                      <div className="bk-label">本机还没有</div>
+                      <div className="bk-label">{t('modal.statMissing')}</div>
                     </div>
                     <div className="bk-stat">
                       <div className="bk-num">{preview.format}</div>
-                      <div className="bk-label">识别为</div>
+                      <div className="bk-label">{t('modal.statDetectedAs')}</div>
                     </div>
                   </div>
 
                   <div className="search" style={{ height: 34 }}>
                     <input
-                      placeholder="导入后的合集名"
+                      placeholder={t('modal.importNamePlaceholder')}
                       value={importName}
                       onChange={(e) => setImportName(e.target.value)}
                     />
@@ -276,7 +295,7 @@ export default function ShareModal({
 
                   {preview.missingCount > 0 && (
                     <>
-                      <div className="section-title">本机还没有的（点右边去工坊订阅）</div>
+                      <div className="section-title">{t('modal.missingTitle')}</div>
                       <div className="bk-list">
                         {preview.missing.map((e, i) => (
                           <div key={`${e.id || e.name}-${i}`} className="bk-row">
@@ -285,18 +304,16 @@ export default function ShareModal({
                               <>
                                 <span className="bk-dim">{e.id}</span>
                                 <button className="btn sm" onClick={() => openWorkshop(e.id as string)}>
-                                  去订阅
+                                  {t('modal.subscribe')}
                                 </button>
                               </>
                             ) : (
-                              <span className="bk-dim">本地 mod（要对方拷给你）</span>
+                              <span className="bk-dim">{t('modal.localModNeedCopy')}</span>
                             )}
                           </div>
                         ))}
                       </div>
-                      <div className="hint">
-                        订阅 / 拷贝之后，回到「合集」页点顶栏的「同步到游戏」把它们装进游戏。
-                      </div>
+                      <div className="hint">{t('modal.afterSubscribeHint')}</div>
                     </>
                   )}
 
@@ -306,7 +323,7 @@ export default function ShareModal({
                       checked={applyAfter}
                       onChange={(e) => setApplyAfter(e.target.checked)}
                     />
-                    导入后立刻应用到游戏（会覆盖当前启用列表）
+                    {t('modal.applyAfterImport')}
                   </label>
                 </>
               )}
@@ -318,17 +335,17 @@ export default function ShareModal({
           {tab === 'import' && preview && (
             <>
               <button className="btn" disabled={busy} onClick={() => setPreview(null)}>
-                重新选
+                {t('modal.chooseAgain')}
               </button>
               <button className="btn primary" disabled={busy} onClick={() => void doImport()}>
                 <IconCheck size={14} />
-                导入这个合集
+                {t('modal.importThisList')}
               </button>
             </>
           )}
           <span className="spacer" />
           <button className="btn" onClick={onClose} disabled={busy}>
-            关闭
+            {t('common.close')}
           </button>
         </div>
       </div>

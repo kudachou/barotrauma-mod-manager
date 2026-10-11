@@ -7,10 +7,12 @@ import type {
   ModlistSummary,
   ScanResult,
   UpdateState,
-  ViewKey
+  ViewKey,
+  WorkshopUpdateInfo
 } from './types';
 import { ALL_CATEGORIES } from './categories';
 import { safeFileName, uniq } from './ui';
+import { features } from './features';
 import Sidebar from './components/Sidebar';
 import LibraryView from './components/LibraryView';
 import CollectionsView from './components/CollectionsView';
@@ -19,21 +21,69 @@ import BrowseView from './components/BrowseView';
 import SettingsView from './components/SettingsView';
 import ModDetailModal from './components/ModDetailModal';
 import UpdateBanner from './components/UpdateBanner';
+import WorkshopUpdateBanner, {
+  shouldShowWorkshopUpdate
+} from './components/WorkshopUpdateBanner';
 import BackupModal from './components/BackupModal';
 import SyncModal from './components/SyncModal';
 import Toasts, { type ToastItem } from './components/Toasts';
 import { IconAlert, IconDownload, IconPlay, IconRefresh } from './components/Icons';
+import {
+  loadSavedLang,
+  persistLang,
+  setLang as applyLang,
+  t,
+  type Lang,
+  type TKey
+} from './i18n';
+import { translateMainMessage } from './i18n/mainMessages';
 
-const TITLES: Record<ViewKey, { title: string; sub: string }> = {
-  library: { title: 'Mod 库', sub: '浏览本地与创意工坊 mod，查看版本对比与分类' },
-  browse: { title: '浏览工坊', sub: '搜索创意工坊上的 mod，打开页面订阅后回到这里同步进游戏' },
-  collections: { title: '合集', sub: '编排 mod 加载顺序，一键应用到游戏' },
-  saves: { title: '存档', sub: '查看每个存档当时启用了哪些 mod，找到能用它实现该存档的合集' },
-  settings: { title: '设置', sub: '指定游戏与 mod 目录位置' }
+const TITLES: Record<ViewKey, { titleKey: TKey; subKey: TKey }> = {
+  library: { titleKey: 'page.library.title', subKey: 'page.library.sub' },
+  browse: { titleKey: 'page.browse.title', subKey: 'page.browse.sub' },
+  collections: { titleKey: 'page.collections.title', subKey: 'page.collections.sub' },
+  saves: { titleKey: 'page.saves.title', subKey: 'page.saves.sub' },
+  settings: { titleKey: 'page.settings.title', subKey: 'page.settings.sub' }
 };
 
 export default function App() {
   const [view, setView] = useState<ViewKey>('library');
+  /*
+   * 界面语言。
+   *
+   * `t()` 读的是模块级状态，组件不会因为语言变化自动重渲染，所以根节点挂了 `key={lang}`：
+   * 语言一变整棵子树重挂，所有 t() 重新求值。切换语言是低频操作，代价可以接受。
+   * 初始化时就要 applyLang()，否则首屏还是中文（会闪一下）。
+   */
+  const [lang, setLangState] = useState<Lang>(() => {
+    const l = loadSavedLang(features.languageSwitch);
+    applyLang(l);
+    return l;
+  });
+  const changeLang = useCallback((l: Lang) => {
+    if (!features.languageSwitch) return;
+    applyLang(l);
+    persistLang(l);
+    setLangState(l);
+  }, []);
+
+  /*
+   * 窗口标题 / 任务栏标题。
+   *
+   * 主进程 `electron/main.js` 里那个 `title:` 只是初始值 —— 页面加载后 HTML 的 `<title>`
+   * 会覆盖它，所以真正生效的是这里。必须在 App 里按语言设置（App 本身不随语言重挂，
+   * 只有它的子树重挂），否则切了语言标题还是旧的。
+   */
+  useEffect(() => {
+    document.title = t('app.title');
+    // <html lang> 也跟着走：影响字体回退、拼写检查、以及无障碍读屏
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
+    /*
+     * 告诉主进程当前语言。只有原生文件/文件夹对话框的标题需要它
+     *（那类文案由系统绘制，渲染层给不了）。见 electron/services/uilang.js。
+     */
+    void api.setUiLang?.(lang);
+  }, [lang]);
   const [data, setData] = useState<ScanResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<ModInfo | null>(null);
@@ -50,8 +100,16 @@ export default function App() {
   const pushToast = useCallback(
     (kind: ToastItem['kind'], title: string, msg?: string) => {
       const id = ++toastSeq.current;
-      setToasts((t) => [...t, { id, kind, title, msg }]);
-      window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5200);
+      /*
+       * 主进程抛上来的提示是中文硬编码（约 40 条），在这里统一翻一道 ——
+       * 改主进程为错误码之前，这是唯一不用动 40 处调用点的位置。
+       * 详见表里写的边界说明（src/i18n/mainMessages.ts）。
+       *
+       * ⚠️ 回调参数别叫 `t`：会遮蔽 i18n 的 t()（这个坑踩过）。
+       */
+      const body = translateMainMessage(msg);
+      setToasts((list) => [...list, { id, kind, title, msg: body }]);
+      window.setTimeout(() => setToasts((list) => list.filter((x) => x.id !== id)), 5200);
     },
     []
   );
@@ -64,7 +122,7 @@ export default function App() {
       const ids: string[] = r.mods.filter((m) => m.source === 'workshop').map((m) => m.id);
       if (ids.length) Promise.resolve(api.fetchPreviews(ids)).catch(() => {});
     } catch (e: any) {
-      pushToast('err', '读取 mod 目录失败', String(e?.message || e));
+      pushToast('err', t('toast.scanFailed'), String(e?.message || e));
     } finally {
       setLoading(false);
     }
@@ -81,6 +139,8 @@ export default function App() {
    */
   const checksRefreshed = useRef(false);
   useEffect(() => {
+    // 创意工坊版没有下架检查（它需要 Web API Key），整段跳过
+    if (!features.delistedCheck) return;
     if (!data?.checksStale || checksRefreshed.current) return;
     checksRefreshed.current = true;
     void (async () => {
@@ -91,14 +151,18 @@ export default function App() {
         const gone = list.filter((c) => c.exists === false).length;
         const unknown = list.filter((c) => c.exists === null).length;
         if (r.apiKeyError) {
-          pushToast('err', 'API Key 不可用，已退回网页检查', r.apiKeyError);
+          pushToast('err', t('toast.apiKeyUnusable'), r.apiKeyError);
         } else if (gone > 0) {
-          pushToast('warn', `发现 ${gone} 个 mod 已被工坊下架`, '点工具栏「已下架」查看');
+          pushToast(
+            'warn',
+            t('toast.delistedFound', { n: gone }),
+            t('toast.delistedFoundHint')
+          );
         } else if (unknown > 0) {
           pushToast(
             'info',
-            '下架检查没能全部完成',
-            `有 ${unknown} 个条目没查到（成人内容需要登录才能看）—— 在设置里填个 Steam API Key 就能可靠检查`
+            t('toast.checkIncomplete'),
+            t('toast.checkUnknownPage', { n: unknown })
           );
         }
       } catch {
@@ -110,6 +174,7 @@ export default function App() {
   /** 手动重跑下架检查（Steam 挡住自动检查时的补救） */
   const [checkingWorkshop, setCheckingWorkshop] = useState(false);
   const recheckWorkshop = useCallback(async () => {
+    if (!features.delistedCheck) return;
     setCheckingWorkshop(true);
     try {
       const r = await api.refreshWorkshopChecks();
@@ -118,20 +183,24 @@ export default function App() {
       const gone = list.filter((c) => c.exists === false).length;
       const unknown = list.filter((c) => c.exists === null).length;
       if (r.apiKeyError) {
-        pushToast('err', 'API Key 不可用', `${r.apiKeyError}（已退回网页检查）`);
+        pushToast(
+          'err',
+          t('toast.apiKeyUnusableShort'),
+          t('toast.fellBackToPage', { err: r.apiKeyError })
+        );
         return;
       }
       pushToast(
         gone > 0 ? 'warn' : 'ok',
-        gone > 0 ? `发现 ${gone} 个 mod 已被工坊下架` : '检查完成，没有发现被下架的 mod',
+        gone > 0 ? t('toast.delistedFound', { n: gone }) : t('toast.checkDoneNothing'),
         unknown > 0
-          ? `另有 ${unknown} 个条目没能核实（成人内容需登录）—— 填个 Steam API Key 就能可靠检查`
+          ? t('toast.checkUnknownShort', { n: unknown })
           : r.mode === 'apikey'
-            ? '通过官方 API 检查'
-            : '通过工坊网页检查'
+            ? t('toast.modeApiKey')
+            : t('toast.modePage')
       );
     } catch (e: any) {
-      pushToast('err', '下架检查失败', String(e?.message || e));
+      pushToast('err', t('toast.checkFailed'), String(e?.message || e));
     } finally {
       setCheckingWorkshop(false);
     }
@@ -140,6 +209,8 @@ export default function App() {
   /** Steam Web API Key（有就走官方接口，没有就抓网页） */
   const [steamApiKey, setSteamApiKeyState] = useState('');
   useEffect(() => {
+    // 创意工坊版不索取 Key，设置里也没有这一栏 —— 别白跑一次 IPC
+    if (!features.apiKey) return;
     void (async () => {
       try {
         setSteamApiKeyState((await api.getSteamApiKey()) || '');
@@ -153,9 +224,13 @@ export default function App() {
       try {
         const saved = await api.setSteamApiKey(key);
         setSteamApiKeyState(saved);
-        pushToast('ok', saved ? '已保存 API Key' : '已清空 API Key', saved ? '下次检查会走官方接口' : '将退回抓网页的方式');
+        pushToast(
+          'ok',
+          saved ? t('toast.apiKeySaved') : t('toast.apiKeyCleared'),
+          saved ? t('toast.apiKeySavedHint') : t('toast.apiKeyClearedHint')
+        );
       } catch (e: any) {
-        pushToast('err', '保存失败', String(e?.message || e));
+        pushToast('err', t('toast.saveFailed'), String(e?.message || e));
       }
     },
     [pushToast]
@@ -182,6 +257,12 @@ export default function App() {
 
   // 更新：注册事件推送 + 启动时静默检查一次
   useEffect(() => {
+    /*
+     * 创意工坊版关掉 electron-updater：它的更新走"工坊把新版下载进来 → 程序比对版本号 →
+     * 提示重装"。主进程那边也没注册 updater 的 IPC，所以这里必须跳过，
+     * 否则会去调不存在的通道。
+     */
+    if (!features.autoUpdater) return;
     const off = api.onUpdaterEvent?.((s: UpdateState) => setUpdate(s));
     void (async () => {
       try {
@@ -196,11 +277,28 @@ export default function App() {
     };
   }, []);
 
+  /*
+   * 工坊版：启动时查一次"工坊下载进来的那份是不是比当前新"。
+   * 纯本地文件读取（不联网、不需要 Key）。没订阅时就查不到，界面上什么都不显示。
+   */
+  const [workshopUpdate, setWorkshopUpdate] = useState<WorkshopUpdateInfo | null>(null);
+  const [dismissedWorkshopVersion, setDismissedWorkshopVersion] = useState<string | null>(null);
+  useEffect(() => {
+    if (features.autoUpdater) return; // 完整版走 electron-updater，不查这个
+    void (async () => {
+      try {
+        setWorkshopUpdate(await api.workshopUpdateCheck());
+      } catch {
+        /* 查不到就当没有更新，不打扰用户 */
+      }
+    })();
+  }, []);
+
   const checkUpdate = useCallback(async () => {
     try {
       setUpdate(await api.updaterCheck());
     } catch (e: any) {
-      pushToast('err', '检查更新失败', String(e?.message || e));
+      pushToast('err', t('toast.updateCheckFailed'), String(e?.message || e));
     }
   }, [pushToast]);
 
@@ -208,7 +306,7 @@ export default function App() {
     try {
       setUpdate(await api.updaterDownload());
     } catch (e: any) {
-      pushToast('err', '下载更新失败', String(e?.message || e));
+      pushToast('err', t('toast.updateDownloadFailed'), String(e?.message || e));
     }
   }, [pushToast]);
 
@@ -216,16 +314,20 @@ export default function App() {
     try {
       await api.updaterInstall();
     } catch (e: any) {
-      pushToast('err', '启动安装失败', String(e?.message || e));
+      pushToast('err', t('toast.updateInstallFailed'), String(e?.message || e));
     }
   }, [pushToast]);
 
   const launchGame = useCallback(async () => {
     try {
       const r = await api.launchGame();
-      pushToast('ok', '正在启动游戏', r && r.via === 'steam' ? '找不到游戏 exe，已交给 Steam 启动' : undefined);
+      pushToast(
+        'ok',
+        t('toast.launching'),
+        r && r.via === 'steam' ? t('toast.launchingViaSteam') : undefined
+      );
     } catch (e: any) {
-      pushToast('err', '启动游戏失败', String(e?.message || e));
+      pushToast('err', t('toast.launchFailed'), String(e?.message || e));
     }
   }, [pushToast]);
 
@@ -288,7 +390,11 @@ export default function App() {
           done.push(m);
         }
       } catch (e: any) {
-        pushToast('err', add ? '加入合集失败' : '移出合集失败', String(e?.message || e));
+        pushToast(
+          'err',
+          add ? t('toast.addToCollectionFailed') : t('toast.removeFromCollectionFailed'),
+          String(e?.message || e)
+        );
         return;
       }
 
@@ -321,11 +427,11 @@ export default function App() {
         pushToast(
           'ok',
           done.length > 1
-            ? `已加入合集「${list.name}」（含 ${done.length - 1} 个关联 mod）`
-            : `已加入合集「${list.name}」`
+            ? t('toast.addedToCollectionWith', { name: list.name, n: done.length - 1 })
+            : t('toast.addedToCollection', { name: list.name })
         );
       } else {
-        pushToast('ok', `已从合集「${list.name}」移出`);
+        pushToast('ok', t('toast.removedFromCollection', { name: list.name }));
       }
     },
     [pushToast]
@@ -337,7 +443,7 @@ export default function App() {
         const next = await api.setRelations(key, keys);
         setData((prev) => (prev ? { ...prev, relations: next } : prev));
       } catch (e: any) {
-        pushToast('err', '保存关联失败', String(e?.message || e));
+        pushToast('err', t('toast.relationsSaveFailed'), String(e?.message || e));
       }
     },
     [pushToast]
@@ -361,7 +467,7 @@ export default function App() {
       try {
         await api.addCustomCategory(name);
       } catch (e: any) {
-        pushToast('err', '新建标签失败', String(e?.message || e));
+        pushToast('err', t('toast.tagCreateFailed'), String(e?.message || e));
         return;
       }
       setData((prev) =>
@@ -376,7 +482,7 @@ export default function App() {
             }
           : prev
       );
-      pushToast('ok', `已新建标签「${name}」`);
+      pushToast('ok', t('toast.tagCreated', { name }));
     },
     [pushToast]
   );
@@ -391,7 +497,7 @@ export default function App() {
         const r = await api.deleteCategory(name);
         affected = (r && r.affected) || 0;
       } catch (e: any) {
-        pushToast('err', '删除标签失败', String(e?.message || e));
+        pushToast('err', t('toast.tagDeleteFailed'), String(e?.message || e));
         return;
       }
       setData((prev) =>
@@ -422,10 +528,10 @@ export default function App() {
       );
       pushToast(
         'ok',
-        `已删除标签「${name}」`,
+        t('toast.tagDeleted', { name }),
         affected
-          ? `已从 ${affected} 个 mod 上移除（重新输入同名标签即可恢复）`
-          : '重新输入同名标签即可恢复'
+          ? t('toast.tagDeletedAffected', { n: affected })
+          : t('toast.tagDeletedHint')
       );
     },
     [pushToast]
@@ -437,7 +543,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app" key={lang}>
       <Sidebar
         view={view}
         onChange={setView}
@@ -449,19 +555,19 @@ export default function App() {
       <div className="main">
         <div className="topbar">
           <div>
-            <div className="page-title">{TITLES[view].title}</div>
-            <div className="page-sub">{TITLES[view].sub}</div>
+            <div className="page-title">{t(TITLES[view].titleKey)}</div>
+            <div className="page-sub">{t(TITLES[view].subKey)}</div>
           </div>
           <span className="spacer" />
           {pendingInstall > 0 && (
             <button
               className="btn"
               onClick={() => setSyncOpen(true)}
-              title={`Steam 已经下载好了 ${pendingInstall} 个 mod 的更新，但游戏还没装 —— 点这里同步进去`}
+              title={t('top.syncToGameTip', { n: pendingInstall })}
               style={{ borderColor: 'var(--warn)' }}
             >
               <IconDownload size={15} />
-              同步到游戏
+              {t('top.syncToGame')}
               <span className="badge st-older">{pendingInstall}</span>
             </button>
           )}
@@ -471,23 +577,23 @@ export default function App() {
               setBackupScope('all');
               setBackupOpen(true);
             }}
-            title="把所有创意工坊 mod 复制一份到 LocalMods"
+            title={t('top.backupWorkshopTip')}
           >
             <IconDownload size={15} />
-            备份工坊 mod
+            {t('top.backupWorkshop')}
           </button>
           <button className="btn" onClick={refresh} disabled={loading}>
             <IconRefresh size={15} />
-            {loading ? '读取中…' : '重新扫描'}
+            {loading ? t('common.loading') : t('top.rescan')}
           </button>
-          <button className="btn primary" onClick={launchGame} title="启动潜渊症">
+          <button className="btn primary" onClick={launchGame} title={t('top.launchGame')}>
             <IconPlay size={15} />
-            启动游戏
+            {t('top.launchGame')}
           </button>
         </div>
 
         <div className="content">
-          {update && update.latestVersion !== dismissedVersion && (
+          {features.autoUpdater && update && update.latestVersion !== dismissedVersion && (
             <UpdateBanner
               state={update}
               onDownload={downloadUpdate}
@@ -496,12 +602,22 @@ export default function App() {
             />
           )}
 
+          {shouldShowWorkshopUpdate(workshopUpdate) &&
+            workshopUpdate &&
+            workshopUpdate.workshopVersion !== dismissedWorkshopVersion && (
+              <WorkshopUpdateBanner
+                info={workshopUpdate}
+                onDismiss={() => setDismissedWorkshopVersion(workshopUpdate.workshopVersion)}
+              />
+            )}
+
           {isMock && (
             <div className="warn-bar">
               <IconAlert size={16} />
               <div>
-                当前是<b>外观预览模式</b>：显示的是内置示例数据（内容取自你真实的 mod
-                目录），不会读写你的磁盘。启动 Electron 客户端后即为真实数据。
+                {t('mock.barPre')}
+                <b>{t('mock.barBold')}</b>
+                {t('mock.barPost')}
               </div>
             </div>
           )}
@@ -519,7 +635,7 @@ export default function App() {
             />
           )}
 
-          {view === 'browse' && (
+          {features.browseWorkshop && view === 'browse' && (
             <BrowseView mods={mods} onToast={pushToast} onGoSettings={() => setView('settings')} />
           )}
 
@@ -547,6 +663,9 @@ export default function App() {
               onCheckUpdate={checkUpdate}
               onDownloadUpdate={downloadUpdate}
               onInstallUpdate={installUpdate}
+              lang={lang}
+              onChangeLang={changeLang}
+              appVersion={workshopUpdate?.currentVersion || update?.currentVersion || ''}
               workshopCheck={{
                 delisted: data.checksDelisted || 0,
                 unknown: data.checksUnknown || 0,

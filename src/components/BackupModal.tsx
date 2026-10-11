@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { BackupPlan, BackupProgress, BackupResult } from '../types';
 import { api } from '../api';
+import { t } from '../i18n';
+import { translateMainMessage } from '../i18n/mainMessages';
 import { IconAlert, IconCheck, IconClose, IconDownload } from './Icons';
 
 export function humanSize(bytes: number): string {
@@ -72,7 +74,7 @@ export default function BackupModal({
   async function cancel() {
     try {
       await api.cancelWorkshopBackup();
-      onToast('warn', '已请求取消', '会在当前文件复制完后停下');
+      onToast('warn', t('modal.cancelRequested'), t('modal.cancelRequestedMsg'));
     } catch {
       /* 忽略 */
     }
@@ -91,22 +93,34 @@ export default function BackupModal({
         <div className="modal-head">
           <div style={{ flex: 1 }}>
             <div className="modal-title">
-              {onlyDelisted ? '备份已下架的工坊 mod' : '一键备份所有工坊 mod 到本地'}
+              {onlyDelisted
+                ? t('modal.backupDelistedTitle')
+                : t('modal.backupAllTitle')}
             </div>
             <div className="page-sub" style={{ marginTop: 4 }}>
               {onlyDelisted ? (
                 <>
-                  这些 mod 已被作者从创意工坊下架，<b>工坊上再也下不到了</b>。
-                  复制进 <code>LocalMods</code> 变成本地 mod 后就不再依赖工坊和 Steam。
+                  {t('modal.backupDelistedBody1')}
+                  <b>{t('modal.backupDelistedBodyBold')}</b>
+                  {t('modal.backupDelistedBody2')}
+                  <code>LocalMods</code>
+                  {t('modal.backupDelistedBody3')}
                 </>
               ) : (
                 <>
-                  把创意工坊 mod 复制进 <code>LocalMods</code>，之后即使工坊更新或下架，本地这份还在。
+                  {t('modal.backupAllBody1')}
+                  <code>LocalMods</code>
+                  {t('modal.backupAllBody2')}
                 </>
               )}
             </div>
           </div>
-          <button className="btn icon" onClick={onClose} disabled={phase === 'running'} title="关闭">
+          <button
+            className="btn icon"
+            onClick={onClose}
+            disabled={phase === 'running'}
+            title={t('common.close')}
+          >
             <IconClose size={16} />
           </button>
         </div>
@@ -116,8 +130,10 @@ export default function BackupModal({
             <div className="bk-center">
               <div className="bk-spinner" />
               <div>
-                正在统计体积…
-                {progress && progress.total ? `（${progress.done}/${progress.total}）` : ''}
+                {t('modal.planningSizes')}
+                {progress && progress.total
+                  ? t('modal.planningProgress', { done: progress.done, total: progress.total })
+                  : ''}
               </div>
               {progress?.current && <div className="bk-dim">{progress.current}</div>}
             </div>
@@ -128,38 +144,44 @@ export default function BackupModal({
               <div className="bk-stats">
                 <div className="bk-stat">
                   <div className="bk-num">{plan.items.length}</div>
-                  <div className="bk-label">{onlyDelisted ? '个待备份' : '个工坊 mod'}</div>
+                  <div className="bk-label">
+                    {onlyDelisted ? t('modal.statPendingBackup') : t('modal.statWorkshopMods')}
+                  </div>
                 </div>
                 <div className="bk-stat">
                   <div className="bk-num">{humanSize(plan.totalBytes)}</div>
-                  <div className="bk-label">预计占用</div>
+                  <div className="bk-label">{t('modal.statEstimatedSize')}</div>
                 </div>
                 <div className="bk-stat">
                   <div className="bk-num">{plan.newCount}</div>
-                  <div className="bk-label">新建</div>
+                  <div className="bk-label">{t('modal.statNew')}</div>
                 </div>
                 <div className="bk-stat">
                   <div className="bk-num">{plan.updateCount}</div>
-                  <div className="bk-label">更新（先留快照）</div>
+                  <div className="bk-label">{t('modal.statUpdates')}</div>
                 </div>
               </div>
 
               {onlyDelisted && (
                 <div className="hint" style={{ marginTop: 14, marginBottom: 0 }}>
-                  已经在 <code>LocalMods</code> 里备份过的会自动跳过 ——
-                  既是省事，也是避免覆盖你自己改过的本地副本。它们会列在下面的「跳过」里。
+                  {t('modal.delistedSkipHint1')}
+                  <code>LocalMods</code>
+                  {t('modal.delistedSkipHint2')}
                 </div>
               )}
 
               <div className="warn-bar" style={{ marginTop: 16 }}>
                 <IconAlert size={16} />
                 <div>
-                  会在 <code>LocalMods</code> 里多出一份完整副本，<b>占用约 {humanSize(plan.totalBytes)} 磁盘空间</b>。
+                  {t('modal.backupWarn1')}
+                  <code>LocalMods</code>
+                  {t('modal.backupWarn2')}
+                  <b>{t('modal.backupWarnBold', { size: humanSize(plan.totalBytes) })}</b>
+                  {t('modal.sentenceEnd')}
                   {plan.updateCount > 0 && (
                     <>
                       {' '}
-                      其中 {plan.updateCount} 个已有本地副本，覆盖前会先存快照，之后可以在 mod
-                      详情页里回滚。
+                      {t('modal.backupUpdateNote', { n: plan.updateCount })}
                     </>
                   )}
                 </div>
@@ -169,24 +191,35 @@ export default function BackupModal({
                 <div className="danger-bar" style={{ marginTop: 12 }}>
                   <IconAlert size={16} />
                   <div>
-                    其中{' '}
-                    <b>{plan.items.filter((i) => i.installedOnly && !i.existing).length} 个</b>{' '}
-                    在 Steam 订阅目录里已经没有了、LocalMods 里也还没备份，
-                    只剩游戏 <code>Installed</code> 里那份副本 —— 这次备份是它们唯一的保底。
+                    {t('modal.onlyInstalledWarn1')}
+                    <b>
+                      {t('modal.onlyInstalledWarnCount', {
+                        n: plan.items.filter((i) => i.installedOnly && !i.existing).length
+                      })}
+                    </b>
+                    {t('modal.onlyInstalledWarn2')}
+                    <code>Installed</code>
+                    {t('modal.onlyInstalledWarn3')}
                   </div>
                 </div>
               )}
 
               {plan.items.some((i) => i.delisted) && !onlyDelisted && (
                 <div className="hint" style={{ marginTop: 12, marginBottom: 0 }}>
-                  计划里有 {plan.items.filter((i) => i.delisted).length} 个是<b>已被作者下架</b>的 mod。
-                  只想处理这些的话，回列表点「已下架」再点「一键备份这些」。
+                  {t('modal.delistedInPlanPre')}
+                  {t('modal.delistedInPlanCount', {
+                    n: plan.items.filter((i) => i.delisted).length
+                  })}
+                  <b>{t('modal.delistedInPlanBold')}</b>
+                  {t('modal.delistedInPlanTail')}
                 </div>
               )}
 
               {plan.skipped.length > 0 && (
                 <>
-                  <div className="section-title">跳过 {plan.skipped.length} 个</div>
+                  <div className="section-title">
+                    {t('modal.skippedTitle', { n: plan.skipped.length })}
+                  </div>
                   <div className="bk-list">
                     {plan.skipped.slice(0, 6).map((s) => (
                       <div key={s.id} className="bk-row">
@@ -195,7 +228,9 @@ export default function BackupModal({
                       </div>
                     ))}
                     {plan.skipped.length > 6 && (
-                      <div className="bk-dim">…还有 {plan.skipped.length - 6} 个</div>
+                      <div className="bk-dim">
+                        {t('modal.moreItems', { n: plan.skipped.length - 6 })}
+                      </div>
                     )}
                   </div>
                 </>
@@ -208,19 +243,22 @@ export default function BackupModal({
               <div className="bk-progress-head">
                 <span>{percent}%</span>
                 <span className="bk-dim">
-                  {progress?.done || 0} / {progress?.total || 0} 个 ·{' '}
-                  {humanSize(progress?.bytesDone || 0)} / {humanSize(progress?.bytesTotal || 0)}
+                  {t('modal.progressCount', {
+                    done: progress?.done || 0,
+                    total: progress?.total || 0
+                  })}{' '}
+                  · {humanSize(progress?.bytesDone || 0)} / {humanSize(progress?.bytesTotal || 0)}
                 </span>
               </div>
               <div className="ub-progress" style={{ height: 8 }}>
                 <div style={{ width: `${percent}%` }} />
               </div>
               <div className="bk-dim" style={{ marginTop: 12 }}>
-                正在复制：{progress?.current || '…'}
+                {t('modal.copying', { name: progress?.current || '…' })}
               </div>
               {!!progress?.snapshotted && (
                 <div className="bk-dim" style={{ marginTop: 4 }}>
-                  已留快照 {progress.snapshotted} 份
+                  {t('modal.snapshottedCount', { n: progress.snapshotted })}
                 </div>
               )}
             </>
@@ -231,7 +269,7 @@ export default function BackupModal({
               {error ? (
                 <div className="warn-bar" style={{ marginBottom: 0 }}>
                   <IconAlert size={16} />
-                  <div>备份失败：{error}</div>
+                  <div>{t('modal.backupFailed', { error: translateMainMessage(error) })}</div>
                 </div>
               ) : result ? (
                 <>
@@ -240,25 +278,25 @@ export default function BackupModal({
                       <div className="bk-num">
                         <IconCheck size={18} /> {result.done}
                       </div>
-                      <div className="bk-label">已备份</div>
+                      <div className="bk-label">{t('modal.statBackedUp')}</div>
                     </div>
                     <div className="bk-stat">
                       <div className="bk-num">{humanSize(result.bytesDone)}</div>
-                      <div className="bk-label">实际写入</div>
+                      <div className="bk-label">{t('modal.statActuallyWritten')}</div>
                     </div>
                     <div className="bk-stat">
                       <div className="bk-num">{result.snapshotted}</div>
-                      <div className="bk-label">留了快照</div>
+                      <div className="bk-label">{t('modal.statSnapshotted')}</div>
                     </div>
                     <div className="bk-stat">
                       <div className="bk-num">{result.errors.length}</div>
-                      <div className="bk-label">失败</div>
+                      <div className="bk-label">{t('modal.statFailed')}</div>
                     </div>
                   </div>
 
                   {result.errors.length > 0 && (
                     <>
-                      <div className="section-title">失败的 mod</div>
+                      <div className="section-title">{t('modal.failedMods')}</div>
                       <div className="bk-list">
                         {result.errors.slice(0, 8).map((e) => (
                           <div key={e.id} className="bk-row">
@@ -272,8 +310,8 @@ export default function BackupModal({
 
                   <div className="hint" style={{ marginTop: 16, marginBottom: 0 }}>
                     {result.snapshotted > 0
-                      ? `已留 ${result.snapshotted} 份快照 —— 去任意本地 mod 的详情页可以回滚。`
-                      : '这些 mod 之前没有本地副本，所以是全新备份。以后再次备份时，旧版本会自动留成快照。'}
+                      ? t('modal.doneWithSnapshots', { n: result.snapshotted })
+                      : t('modal.doneFreshBackup')}
                   </div>
                 </>
               ) : null}
@@ -285,22 +323,23 @@ export default function BackupModal({
           {phase === 'ready' && (
             <>
               <button className="btn" onClick={onClose}>
-                取消
+                {t('common.cancel')}
               </button>
               <button className="btn primary" onClick={start} disabled={!plan || plan.items.length === 0}>
                 <IconDownload size={15} />
-                开始备份{plan ? `（${plan.items.length} 个）` : ''}
+                {t('modal.startBackup')}
+                {plan ? t('modal.startBackupCount', { n: plan.items.length }) : ''}
               </button>
             </>
           )}
           {phase === 'running' && (
             <button className="btn danger" onClick={cancel}>
-              取消备份
+              {t('modal.cancelBackup')}
             </button>
           )}
           {phase === 'done' && (
             <button className="btn primary" onClick={onClose}>
-              关闭
+              {t('common.close')}
             </button>
           )}
         </div>

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { t } from './i18n';
 
 /**
  * 把工坊描述渲染成界面内容。
@@ -82,7 +83,8 @@ function parseInline(src: string): Inline[] {
     else if (tag === 'i' || tag === 'u') pushText(out, m[2], { italic: true });
     else if (m[3] !== undefined) pushText(out, m[4] || m[3], { href: m[3] });
     else if (m[5] !== undefined) pushText(out, m[5], { href: m[5] });
-    else out.push({ text: '［图片］' });
+    // 工坊描述里的 [img] 标签：显示成占位文字（是用户可见文案，要跟着语言走）
+    else out.push({ text: t('modal.imagePlaceholder') });
     last = re.lastIndex;
   }
   if (last < src.length) splitBareUrls(out, stripTags(src.slice(last)), {});

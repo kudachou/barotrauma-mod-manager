@@ -1,5 +1,6 @@
 import type { UpdateState } from '../types';
 import { IconCheck, IconDownload, IconRefresh } from './Icons';
+import { t } from '../i18n';
 
 /** 有新版本 / 下载中 / 已下载完成 时显示在内容区顶部 */
 export default function UpdateBanner({
@@ -29,17 +30,15 @@ export default function UpdateBanner({
       <div style={{ flex: 1, minWidth: 0 }}>
         {status === 'available' && (
           <>
-            <div className="ub-title">
-              发现新版本 v{next}（当前 v{cur}）
-            </div>
-            <div className="ub-sub">下载完会自动重启安装，不用再手动下载。</div>
+            <div className="ub-title">{t('updateBar.available', { next, cur })}</div>
+            <div className="ub-sub">{t('updateBar.availableHint')}</div>
           </>
         )}
 
         {status === 'downloading' && (
           <>
             <div className="ub-title">
-              正在下载 v{next}… {Math.round(percent)}%
+              {t('updateBar.downloading', { next, percent: Math.round(percent) })}
             </div>
             <div className="ub-progress">
               <div style={{ width: `${percent}%` }} />
@@ -49,8 +48,8 @@ export default function UpdateBanner({
 
         {status === 'downloaded' && (
           <>
-            <div className="ub-title">v{next} 已下载完成</div>
-            <div className="ub-sub">点「立即重启安装」完成更新，程序会自动重启。</div>
+            <div className="ub-title">{t('updateBar.downloaded', { next })}</div>
+            <div className="ub-sub">{t('updateBar.downloadedHint')}</div>
           </>
         )}
       </div>
@@ -60,17 +59,17 @@ export default function UpdateBanner({
           <>
             <button className="btn sm primary" onClick={onDownload}>
               <IconDownload size={13} />
-              下载更新
+              {t('updateBar.download')}
             </button>
             <button className="btn sm" onClick={onDismiss}>
-              稍后
+              {t('updateBar.later')}
             </button>
           </>
         )}
         {status === 'downloaded' && (
           <button className="btn sm primary" onClick={onInstall}>
             <IconRefresh size={13} />
-            立即重启安装
+            {t('updateBar.installNow')}
           </button>
         )}
       </div>

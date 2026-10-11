@@ -8,6 +8,10 @@ import type {
 } from '../types';
 import { api, imgSrc, placeholderHue } from '../api';
 import { categoryStyle } from '../categories';
+import { features } from '../features';
+import { getLang, t } from '../i18n';
+import { categoryLabel } from '../i18n/categories';
+import { translateMainMessage } from '../i18n/mainMessages';
 import { compareBadge, fmtDate, initials, modKey, uniq } from '../ui';
 import { humanSize } from './BackupModal';
 import { WorkshopText } from '../workshopText';
@@ -33,10 +37,12 @@ function fmtDateTime(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 订阅数之类的大数字，超过一万用「万」显示 */
+/** 订阅数之类的大数字，超过一万用「万」显示（英文界面按千位显示 k） */
 function fmtCount(n: number): string {
   if (!n) return '0';
-  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
+  if (n >= 10000) {
+    return t('modal.countWan', { n: (n / 10000).toFixed(1), k: (n / 1000).toFixed(1) });
+  }
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
 }
@@ -165,6 +171,12 @@ export default function ModDetailModal({
     setWsError(null);
     setWsDetails(null);
     if (!workshopId) return;
+    /*
+     * 工坊描述只在有浏览工坊功能的变体里取。
+     * 创意工坊版关掉了 `workshop:details`（要 Web API Key），不挡的话这里会白跑一次请求、
+     * 必然抛错，然后在控制台留一条没用的报错（界面那块已经隐藏了）。
+     */
+    if (!features.browseWorkshop) return;
     let alive = true;
     setWsLoading(true);
     api
@@ -219,14 +231,14 @@ export default function ModDetailModal({
   const hue = placeholderHue(mod.name);
   const cp = mod.counterpart;
 
-  async function toggleTag(t: string) {
-    const next = tags.includes(t) ? tags.filter((x) => x !== t) : [...tags, t];
+  async function toggleTag(tag: string) {
+    const next = tags.includes(tag) ? tags.filter((x) => x !== tag) : [...tags, tag];
     setTags(next);
     try {
       await api.setModCategories(key, next);
       onModUpdate({ ...mod, categories: next });
     } catch (e: any) {
-      onToast('err', '标签保存失败', String(e?.message || e));
+      onToast('err', t('modal.tagSaveFailed'), String(e?.message || e));
     }
   }
 
@@ -255,10 +267,10 @@ export default function ModDetailModal({
       if (p) {
         setPreview(p);
         onModUpdate({ ...mod, preview: p });
-        onToast('ok', '封面已更新');
+        onToast('ok', t('modal.coverUpdated'));
       }
     } catch (e: any) {
-      onToast('err', '设置封面失败', String(e?.message || e));
+      onToast('err', t('modal.setCoverFailed'), String(e?.message || e));
     }
   }
 
@@ -272,9 +284,9 @@ export default function ModDetailModal({
       await api.overwriteLocalWithWorkshop(mod.id, cp?.id);
       await loadSnapshots();
       await onRefresh();
-      onToast('ok', '已用创意工坊版覆盖本地', '覆盖前的本地版本已存成快照，可在「历史版本」里回滚');
+      onToast('ok', t('modal.overwrittenLocal'), t('modal.overwrittenLocalMsg'));
     } catch (e: any) {
-      onToast('err', '覆盖失败', String(e?.message || e));
+      onToast('err', t('modal.overwriteFailed'), String(e?.message || e));
     }
   }
 
@@ -283,9 +295,9 @@ export default function ModDetailModal({
     try {
       await api.createSnapshot(mod.id);
       await loadSnapshots();
-      onToast('ok', '已创建快照', '之后改坏了可以回滚到这一刻');
+      onToast('ok', t('modal.snapCreated'), t('modal.snapCreatedMsg'));
     } catch (e: any) {
-      onToast('err', '创建快照失败', String(e?.message || e));
+      onToast('err', t('modal.snapCreateFailed'), String(e?.message || e));
     } finally {
       setSnapBusy(false);
     }
@@ -299,11 +311,11 @@ export default function ModDetailModal({
       setPendingRestore(null);
       onToast(
         'ok',
-        '已回滚到该版本',
-        r?.undoId ? '回滚前的状态也存成快照了，可以再回滚回去' : undefined
+        t('modal.restoredToVersion'),
+        r?.undoId ? t('modal.restoredToVersionMsg') : undefined
       );
     } catch (e: any) {
-      onToast('err', '回滚失败', String(e?.message || e));
+      onToast('err', t('modal.restoreFailed'), String(e?.message || e));
     } finally {
       setSnapBusy(false);
     }
@@ -314,9 +326,9 @@ export default function ModDetailModal({
     try {
       await api.deleteSnapshot(mod.id, id);
       await loadSnapshots();
-      onToast('ok', '已删除快照');
+      onToast('ok', t('modal.snapDeleted'));
     } catch (e: any) {
-      onToast('err', '删除快照失败', String(e?.message || e));
+      onToast('err', t('modal.snapDeleteFailed'), String(e?.message || e));
     } finally {
       setSnapBusy(false);
     }
@@ -338,14 +350,16 @@ export default function ModDetailModal({
     try {
       const r = await api.deleteLocalMod(mod.id, removeFromLists);
       const parts = [
-        r.snapshotCount ? `含 ${r.snapshotCount} 份历史快照` : null,
-        r.removedFromModlists.length ? `已从 ${r.removedFromModlists.length} 个合集移除` : null,
-        r.freedBytes ? `释放 ${humanSize(r.freedBytes)}` : null
+        r.snapshotCount ? t('modal.deletedPartSnapshots', { n: r.snapshotCount }) : null,
+        r.removedFromModlists.length
+          ? t('modal.deletedPartLists', { n: r.removedFromModlists.length })
+          : null,
+        r.freedBytes ? t('modal.deletedPartFreed', { size: humanSize(r.freedBytes) }) : null
       ].filter(Boolean) as string[];
-      onToast('ok', `已删除本地 mod「${mod.name}」`, parts.join(' · ') || undefined);
+      onToast('ok', t('modal.localDeleted', { name: mod.name }), parts.join(' · ') || undefined);
       onLocalModDeleted();
     } catch (e: any) {
-      onToast('err', '删除失败', String(e?.message || e));
+      onToast('err', t('modal.deleteFailed'), String(e?.message || e));
     } finally {
       setDeleting(false);
     }
@@ -353,10 +367,13 @@ export default function ModDetailModal({
 
   async function doCopyToLocal() {
     try {
-      const r = await api.copyWorkshopToLocal(cp?.id || mod.id, `${mod.name}(复制)`);
-      onToast('ok', '已复制为新本地 mod', r?.newFolder);
+      const r = await api.copyWorkshopToLocal(
+        cp?.id || mod.id,
+        t('modal.copyNamePattern', { name: mod.name })
+      );
+      onToast('ok', t('modal.copiedToLocal'), r?.newFolder);
     } catch (e: any) {
-      onToast('err', '复制失败', String(e?.message || e));
+      onToast('err', t('modal.copyFailed'), String(e?.message || e));
     }
   }
 
@@ -382,13 +399,15 @@ export default function ModDetailModal({
             <div className="modal-title">{mod.name}</div>
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               <span className={`badge ${mod.source === 'local' ? 'src-local' : 'src-workshop'}`}>
-                {mod.source === 'local' ? '本地 mod' : '创意工坊 mod'}
+                {mod.source === 'local'
+                  ? t('modal.sourceLocalMod')
+                  : t('modal.sourceWorkshopMod')}
               </span>
               <span className="badge ver">v{mod.modVersion || '?'}</span>
-              {badge && <span className={`badge ${badge.cls}`}>{badge.text}</span>}
+              {badge && <span className={`badge ${badge.cls}`}>{t(badge.key)}</span>}
             </div>
           </div>
-          <button className="btn icon" onClick={onClose} title="关闭">
+          <button className="btn icon" onClick={onClose} title={t('common.close')}>
             <IconClose size={16} />
           </button>
         </div>
@@ -396,11 +415,11 @@ export default function ModDetailModal({
         <div className="modal-body">
           {mod.source === 'local' && (
             <>
-              <div className="section-title">版本对比</div>
+              <div className="section-title">{t('modal.versionCompare')}</div>
               {cp ? (
                 <div className="cmp">
                   <div className="cmp-side">
-                    <div className="label">本地版本</div>
+                    <div className="label">{t('modal.localVersion')}</div>
                     <div className="ver">{mod.modVersion || '?'}</div>
                     <div className="nm">{mod.name}</div>
                   </div>
@@ -414,7 +433,7 @@ export default function ModDetailModal({
                     )}
                   </div>
                   <div className="cmp-side">
-                    <div className="label">创意工坊版本</div>
+                    <div className="label">{t('modal.workshopVersion')}</div>
                     <div className="ver">{cp.version || '?'}</div>
                     <div className="nm">
                       {cp.name} · #{cp.id}
@@ -425,30 +444,37 @@ export default function ModDetailModal({
                 <div className="warn-bar">
                   <IconAlert size={16} />
                   <div>
-                    该本地 mod 的 filelist.xml 里没有 <code>steamworkshopid</code>
-                    ，无法自动匹配创意工坊版本（可能是原创 mod 或自改 mod）。
+                    {t('modal.noWorkshopIdPre')}
+                    <code>steamworkshopid</code>
+                    {t('modal.noWorkshopIdPost')}
                   </div>
                 </div>
               )}
             </>
           )}
 
-          {workshopId && (
+          {/*
+            工坊描述整块只在**有浏览工坊功能**的变体里显示。
+            创意工坊版关掉了 `workshop:details`（它要 Web API Key），这块以前会渲染出来并
+            直接给用户甩一句主进程报错（`Error invoking remote method 'workshop:details': …`）。
+            底部的「Workshop page」按钮不受影响，跳转工坊页面本来就不需要 Key。
+          */}
+          {workshopId && features.browseWorkshop && (
             <>
-              <div className="section-title">创意工坊描述</div>
+              <div className="section-title">{t('modal.wsDescription')}</div>
 
               {wsLoading ? (
                 <div className="hint" style={{ marginBottom: 0 }}>
-                  正在从 Steam 读取…
+                  {t('modal.wsReading')}
                 </div>
               ) : wsError ? (
                 <div className="warn-bar" style={{ marginBottom: 0 }}>
                   <IconAlert size={16} />
-                  <div>读取失败：{wsError}</div>
+                  <div>{t('modal.wsReadFailed', { error: translateMainMessage(wsError) })}</div>
                 </div>
               ) : !wsDetails ? (
                 <div className="hint" style={{ marginBottom: 0 }}>
-                  工坊上没有这个条目（可能已下架或作者设为不公开）。
+                  {t('modal.wsNotFound')}
                 </div>
               ) : (
                 <>
@@ -456,18 +482,20 @@ export default function ModDetailModal({
                     <div className="danger-bar" style={{ marginTop: 0, marginBottom: 12 }}>
                       <IconAlert size={16} />
                       <div>
-                        这个条目在工坊上已被封禁
-                        {wsDetails.banReason ? `：${wsDetails.banReason}` : '。'}
+                        {t('modal.wsBannedPre')}
+                        {wsDetails.banReason
+                          ? t('modal.wsBannedReason', { reason: wsDetails.banReason })
+                          : t('modal.sentenceEnd')}
                       </div>
                     </div>
                   )}
 
                   <div className="ws-stats">
-                    <span>订阅 {fmtCount(wsDetails.subscriptions)}</span>
-                    <span>收藏 {fmtCount(wsDetails.favorited)}</span>
-                    <span>浏览 {fmtCount(wsDetails.views)}</span>
+                    <span>{t('modal.wsSubscriptions', { n: fmtCount(wsDetails.subscriptions) })}</span>
+                    <span>{t('modal.wsFavorited', { n: fmtCount(wsDetails.favorited) })}</span>
+                    <span>{t('modal.wsViews', { n: fmtCount(wsDetails.views) })}</span>
                     {wsDetails.timeUpdated ? (
-                      <span>更新于 {fmtDate(wsDetails.timeUpdated * 1000)}</span>
+                      <span>{t('modal.wsUpdatedAt', { date: fmtDate(wsDetails.timeUpdated * 1000) })}</span>
                     ) : null}
                   </div>
 
@@ -490,14 +518,14 @@ export default function ModDetailModal({
                     </div>
                   ) : (
                     <div className="hint" style={{ marginBottom: 0 }}>
-                      作者没有填写描述。
+                      {t('modal.wsNoDescription')}
                     </div>
                   )}
 
                   <div className="btn-row" style={{ marginTop: 10 }}>
                     <button className="btn sm" onClick={() => void api.getWorkshopPage(workshopId)}>
                       <IconExternal size={14} />
-                      在工坊页面打开
+                      {t('modal.openWorkshopPage')}
                     </button>
                   </div>
                 </>
@@ -505,7 +533,7 @@ export default function ModDetailModal({
             </>
           )}
 
-          <div className="section-title">加入合集（点击切换）</div>
+          <div className="section-title">{t('modal.joinLists')}</div>
           <div className="tag-edit">
             {modlists.map((l) => {
               const on = mod.usedIn.includes(l.name);
@@ -513,7 +541,11 @@ export default function ModDetailModal({
                 <button
                   key={l.fileName}
                   className={`tag-toggle list-toggle ${on ? 'on' : ''}`}
-                  title={on ? `从「${l.name}」移出` : `加入「${l.name}」`}
+                  title={
+                    on
+                      ? t('modal.listRemoveTip', { name: l.name })
+                      : t('modal.listAddTip', { name: l.name })
+                  }
                   onClick={() => onListClick(l, on)}
                 >
                   {on ? '✓ ' : '+ '}
@@ -524,7 +556,7 @@ export default function ModDetailModal({
             })}
             {!creatingList && (
               <button className="tag-toggle" onClick={() => setCreatingList(true)}>
-                + 新建合集
+                {t('modal.newList')}
               </button>
             )}
           </div>
@@ -534,11 +566,13 @@ export default function ModDetailModal({
               <IconAlert size={16} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div>
-                  「{mod.name}」有 {relatedMods.length} 个关联 mod：
-                  <b>{relatedMods.map((m) => m.name).join('、')}</b>。
+                  {t('modal.relatedAskPre', { name: mod.name })}
+                  {t('modal.relatedAskCount', { n: relatedMods.length })}
+                  <b>{relatedMods.map((m) => m.name).join(t('common.listSeparator'))}</b>
+                  {t('modal.sentenceEnd')}
                 </div>
                 <div className="bk-dim" style={{ marginTop: 3 }}>
-                  要一起加进「{pendingList.name}」吗？（关联通常就是前置，缺了会加载失败）
+                  {t('modal.relatedConfirm', { name: pendingList.name })}
                 </div>
                 <div className="btn-row" style={{ marginTop: 8 }}>
                   <button
@@ -549,7 +583,7 @@ export default function ModDetailModal({
                       void onSetModlistMembership([mod, ...relatedMods], target, true);
                     }}
                   >
-                    一起加入（{relatedMods.length + 1} 个）
+                    {t('modal.addTogether', { n: relatedMods.length + 1 })}
                   </button>
                   <button
                     className="btn sm"
@@ -559,10 +593,10 @@ export default function ModDetailModal({
                       void onSetModlistMembership(mod, target, true);
                     }}
                   >
-                    只加这个
+                    {t('modal.addOnlyThis')}
                   </button>
                   <button className="btn sm" onClick={() => setPendingList(null)}>
-                    取消
+                    {t('common.cancel')}
                   </button>
                 </div>
               </div>
@@ -574,7 +608,7 @@ export default function ModDetailModal({
               <input
                 className="input"
                 style={{ maxWidth: 220, height: 32 }}
-                placeholder="新合集名称…"
+                placeholder={t('modal.newListPlaceholder')}
                 autoFocus
                 value={newListName}
                 onChange={(e) => setNewListName(e.target.value)}
@@ -596,10 +630,10 @@ export default function ModDetailModal({
                   setCreatingList(false);
                 }}
               >
-                创建并加入
+                {t('modal.createAndJoin')}
               </button>
               <button className="btn sm" onClick={() => setCreatingList(false)}>
-                取消
+                {t('common.cancel')}
               </button>
             </div>
           )}
@@ -607,22 +641,23 @@ export default function ModDetailModal({
           {isLocal && (
             <>
               <div className="section-title">
-                历史版本{snapshots.length ? `（${snapshots.length}）` : ''}
+                {t('modal.historyTitle')}
+                {snapshots.length ? t('modal.parenCount', { n: snapshots.length }) : ''}
               </div>
 
               <div className="btn-row" style={{ marginBottom: snapshots.length ? 10 : 8 }}>
                 <button className="btn sm" onClick={createSnap} disabled={snapBusy}>
                   <IconPlus size={13} />
-                  创建快照
+                  {t('modal.createSnapshot')}
                 </button>
                 <span className="bk-dim" style={{ alignSelf: 'center' }}>
-                  覆盖工坊版 / 再次备份工坊 mod 时也会自动留快照
+                  {t('modal.snapshotAutoHint')}
                 </span>
               </div>
 
               {snapshots.length === 0 ? (
                 <div className="hint" style={{ marginBottom: 0 }}>
-                  还没有快照。点「创建快照」把当前状态存下来，之后改坏了可以一键回滚。
+                  {t('modal.noSnapshots')}
                 </div>
               ) : (
                 <div className="snap-list">
@@ -632,7 +667,7 @@ export default function ModDetailModal({
                         <div className="snap-time">{fmtDateTime(s.at)}</div>
                         <div className="snap-meta">
                           {s.label && <span className="badge ver">{s.label}</span>}
-                          {humanSize(s.bytes)} · {s.files} 个文件
+                          {humanSize(s.bytes)} · {t('modal.fileCount', { n: s.files })}
                         </div>
                       </div>
                       {pendingRestore === s.id ? (
@@ -642,10 +677,10 @@ export default function ModDetailModal({
                             onClick={() => void doRestore(s.id)}
                             disabled={snapBusy}
                           >
-                            确认回滚
+                            {t('modal.confirmRestore')}
                           </button>
                           <button className="btn sm" onClick={() => setPendingRestore(null)}>
-                            取消
+                            {t('common.cancel')}
                           </button>
                         </>
                       ) : (
@@ -656,11 +691,11 @@ export default function ModDetailModal({
                             disabled={snapBusy}
                           >
                             <IconRefresh size={13} />
-                            回滚
+                            {t('modal.restore')}
                           </button>
                           <button
                             className="btn icon sm"
-                            title="删除这个快照"
+                            title={t('modal.deleteSnapshotTip')}
                             onClick={() => void doDeleteSnap(s.id)}
                             disabled={snapBusy}
                           >
@@ -677,8 +712,9 @@ export default function ModDetailModal({
                 <div className="warn-bar" style={{ marginTop: 10, marginBottom: 0 }}>
                   <IconAlert size={16} />
                   <div>
-                    回滚会把这个 mod 的文件夹替换成所选快照的内容。当前状态会先自动存成一份新快照，
-                    所以<b>回滚本身也能撤销</b>。
+                    {t('modal.restoreHintPre')}
+                    <b>{t('modal.restoreHintBold')}</b>
+                    {t('modal.sentenceEnd')}
                   </div>
                 </div>
               )}
@@ -688,15 +724,16 @@ export default function ModDetailModal({
                   <IconAlert size={16} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div>
-                      确定删除本地 mod「{mod.name}」？<b>不可撤销。</b>
+                      {t('modal.deleteLocalConfirmPre', { name: mod.name })}
+                      <b>{t('modal.deleteLocalIrreversible')}</b>
                     </div>
                     <div className="bk-dim" style={{ marginTop: 4 }}>
-                      会删除 mod 文件夹
+                      {t('modal.deleteFolderBase')}
                       {footprint && footprint.snapshotCount > 0
-                        ? ` 和它的 ${footprint.snapshotCount} 份历史快照`
+                        ? t('modal.deleteFolderSnaps', { n: footprint.snapshotCount })
                         : ''}
                       {footprint && footprint.totalBytes > 0
-                        ? `（约释放 ${humanSize(footprint.totalBytes)}）`
+                        ? t('modal.deleteFreedBytes', { size: humanSize(footprint.totalBytes) })
                         : ''}
                     </div>
                     {mod.usedIn.length > 0 && (
@@ -706,19 +743,22 @@ export default function ModDetailModal({
                           checked={removeFromLists}
                           onChange={(e) => setRemoveFromLists(e.target.checked)}
                         />
-                        同时从 {mod.usedIn.length} 个合集里移除引用（{mod.usedIn.join('、')}）
+                        {t('modal.removeFromLists', {
+                          n: mod.usedIn.length,
+                          list: mod.usedIn.join(t('common.listSeparator'))
+                        })}
                       </label>
                     )}
                   </div>
                   <button className="btn sm danger" onClick={doDeleteLocal} disabled={deleting}>
-                    {deleting ? '删除中…' : '确认删除'}
+                    {deleting ? t('modal.deleting') : t('modal.confirmDelete')}
                   </button>
                   <button
                     className="btn sm"
                     onClick={() => setConfirmDeleteLocal(false)}
                     disabled={deleting}
                   >
-                    取消
+                    {t('common.cancel')}
                   </button>
                 </div>
               )}
@@ -726,7 +766,8 @@ export default function ModDetailModal({
           )}
 
           <div className="section-title">
-            关联 mod{relatedMods.length > 0 ? `（${relatedMods.length}）` : ''}
+            {t('modal.relatedMods')}
+            {relatedMods.length > 0 ? t('modal.parenCount', { n: relatedMods.length }) : ''}
           </div>
 
           {relatedMods.length > 0 ? (
@@ -734,7 +775,7 @@ export default function ModDetailModal({
               {relatedMods.map((r) => (
                 <div key={`${r.source}:${r.id}`} className="rel-row">
                   <span className={`badge ${r.source === 'local' ? 'src-local' : 'src-workshop'}`}>
-                    {r.source === 'local' ? '本地' : '工坊'}
+                    {r.source === 'local' ? t('card.source.local') : t('card.source.workshop')}
                   </span>
                   <span className="rel-name" title={r.name}>
                     {r.name}
@@ -742,7 +783,7 @@ export default function ModDetailModal({
                   {r.modVersion && <span className="badge ver">v{r.modVersion}</span>}
                   <button
                     className="btn icon sm"
-                    title="取消关联"
+                    title={t('modal.unlinkTip')}
                     onClick={() => void toggleRelation(r)}
                   >
                     <IconTrash size={13} />
@@ -752,13 +793,13 @@ export default function ModDetailModal({
             </div>
           ) : (
             <div className="hint" style={{ marginBottom: 8 }}>
-              还没有关联。关联一般用来记「前置 mod」—— 加入合集时可以顺手把它们一起加进去。
+              {t('modal.noRelations')}
             </div>
           )}
 
           {danglingRelations.length > 0 && (
             <div className="bk-dim" style={{ marginBottom: 8 }}>
-              有 {danglingRelations.length} 个关联的 mod 已经不在库里了
+              {t('modal.danglingRelations', { n: danglingRelations.length })}
               <button
                 className="btn sm"
                 style={{ marginLeft: 8 }}
@@ -769,7 +810,7 @@ export default function ModDetailModal({
                   )
                 }
               >
-                清理
+                {t('modal.cleanup')}
               </button>
             </div>
           )}
@@ -777,7 +818,7 @@ export default function ModDetailModal({
           {!showRelationPicker ? (
             <button className="btn sm" onClick={() => setShowRelationPicker(true)}>
               <IconPlus size={13} />
-              添加关联 mod
+              {t('modal.addRelation')}
             </button>
           ) : (
             <div className="rel-picker">
@@ -785,7 +826,7 @@ export default function ModDetailModal({
                 <IconSearch size={14} />
                 <input
                   autoFocus
-                  placeholder="搜索 mod 名称 / 工坊 ID…"
+                  placeholder={t('library.searchPlaceholder')}
                   value={relationQ}
                   onChange={(e) => setRelationQ(e.target.value)}
                 />
@@ -793,7 +834,7 @@ export default function ModDetailModal({
               <div className="rel-candidates">
                 {relationCandidates.length === 0 && (
                   <div className="bk-dim" style={{ padding: 10 }}>
-                    没有匹配的 mod
+                    {t('library.empty')}
                   </div>
                 )}
                 {relationCandidates.map((m) => (
@@ -803,7 +844,7 @@ export default function ModDetailModal({
                     onClick={() => void toggleRelation(m)}
                   >
                     <span className={`badge ${m.source === 'local' ? 'src-local' : 'src-workshop'}`}>
-                      {m.source === 'local' ? '本地' : '工坊'}
+                      {m.source === 'local' ? t('card.source.local') : t('card.source.workshop')}
                     </span>
                     <span className="rel-name">{m.name}</span>
                     <IconPlus size={13} />
@@ -817,13 +858,14 @@ export default function ModDetailModal({
                   setRelationQ('');
                 }}
               >
-                完成
+                {t('modal.done')}
               </button>
             </div>
           )}
 
           <div className="section-title">
-            分类标签{managingTags ? '（管理：点 ✕ 删除）' : '（点击切换）'}
+            {t('modal.tagsTitle')}
+            {managingTags ? t('modal.tagsManaging') : t('modal.tagsClickToggle')}
           </div>
           <div className="tag-edit">
             {allCategories.map((c) =>
@@ -833,10 +875,11 @@ export default function ModDetailModal({
                   className={`tag-toggle ${tags.includes(c) ? 'on' : ''}`}
                   style={{ ...(tags.includes(c) ? categoryStyle(c) : {}), cursor: 'default' }}
                 >
-                  {c}
+                  {/* 只翻显示名：c 是分类主键，删除/匹配都用它 */}
+                  {categoryLabel(c, getLang())}
                   <button
                     className="tag-del"
-                    title={`删除标签「${c}」`}
+                    title={t('modal.deleteTagTip', { name: categoryLabel(c, getLang()) })}
                     onClick={() => setPendingDelete(c)}
                   >
                     ✕
@@ -849,13 +892,13 @@ export default function ModDetailModal({
                   onClick={() => toggleTag(c)}
                   style={tags.includes(c) ? categoryStyle(c) : undefined}
                 >
-                  {c}
+                  {categoryLabel(c, getLang())}
                 </button>
               )
             )}
             {!managingTags && !creatingTag && (
               <button className="tag-toggle" onClick={() => setCreatingTag(true)}>
-                + 新建标签
+                {t('modal.newTag')}
               </button>
             )}
             {!creatingTag && (
@@ -866,7 +909,7 @@ export default function ModDetailModal({
                   setPendingDelete(null);
                 }}
               >
-                {managingTags ? '完成' : '管理标签'}
+                {managingTags ? t('modal.done') : t('modal.manageTags')}
               </button>
             )}
           </div>
@@ -878,14 +921,14 @@ export default function ModDetailModal({
             >
               <IconAlert size={16} />
               <div style={{ flex: 1 }}>
-                确定删除标签「{pendingDelete}」？它会从所有使用它的 mod 上移除。
-                <span style={{ opacity: 0.75 }}>重新输入同名标签即可恢复。</span>
+                {t('modal.deleteTagConfirm', { name: pendingDelete })}
+                <span style={{ opacity: 0.75 }}>{t('modal.deleteTagRestoreHint')}</span>
               </div>
               <button className="btn sm danger" onClick={() => void doDeleteTag()}>
-                确认删除
+                {t('modal.confirmDelete')}
               </button>
               <button className="btn sm" onClick={() => setPendingDelete(null)}>
-                取消
+                {t('common.cancel')}
               </button>
             </div>
           )}
@@ -895,7 +938,7 @@ export default function ModDetailModal({
               <input
                 className="input"
                 style={{ maxWidth: 200, height: 32 }}
-                placeholder="新标签名称…"
+                placeholder={t('modal.newTagPlaceholder')}
                 autoFocus
                 value={newTagName}
                 onChange={(e) => setNewTagName(e.target.value)}
@@ -905,35 +948,47 @@ export default function ModDetailModal({
                 }}
               />
               <button className="btn sm primary" onClick={() => void createTag()}>
-                创建并打标
+                {t('modal.createAndTag')}
               </button>
               <button className="btn sm" onClick={() => setCreatingTag(false)}>
-                取消
+                {t('common.cancel')}
               </button>
             </div>
           )}
 
-          <div className="section-title">详细信息</div>
+          <div className="section-title">{t('modal.details')}</div>
           <dl className="kv">
-            <dt>来源</dt>
-            <dd>{mod.source === 'local' ? `本地 · ${mod.folder}` : `创意工坊 · #${mod.id}`}</dd>
-            <dt>文件夹</dt>
+            <dt>{t('modal.dtSource')}</dt>
+            <dd>
+              {mod.source === 'local'
+                ? t('modal.sourceLocalFolder', { folder: mod.folder })
+                : t('modal.sourceWorkshopId', { id: mod.id })}
+            </dd>
+            <dt>{t('modal.dtFolder')}</dt>
             <dd>{mod.folder}</dd>
             {mod.steamworkshopid && (
               <>
-                <dt>工坊 ID</dt>
+                <dt>{t('modal.dtWorkshopId')}</dt>
                 <dd>#{mod.steamworkshopid}</dd>
               </>
             )}
-            <dt>游戏版本</dt>
+            <dt>{t('modal.dtGameVersion')}</dt>
             <dd>{mod.gameVersion || '—'}</dd>
-            <dt>修改时间</dt>
+            <dt>{t('modal.dtMtime')}</dt>
             <dd>{fmtDate(mod.mtime)}</dd>
-            <dt>自动分类</dt>
-            <dd>{mod.autoCategories.length ? mod.autoCategories.join('、') : '—'}</dd>
-            <dt>已用于合集</dt>
-            <dd>{mod.usedIn.length ? mod.usedIn.join('、') : '未在合集中启用'}</dd>
-            <dt>路径</dt>
+            <dt>{t('modal.dtAutoCategories')}</dt>
+            <dd>
+              {mod.autoCategories.length
+                ? mod.autoCategories.map((c) => categoryLabel(c, getLang())).join(t('common.listSeparator'))
+                : '—'}
+            </dd>
+            <dt>{t('modal.dtUsedIn')}</dt>
+            <dd>
+              {mod.usedIn.length
+                ? mod.usedIn.join(t('common.listSeparator'))
+                : t('modal.notInAnyList')}
+            </dd>
+            <dt>{t('modal.dtPath')}</dt>
             <dd style={{ color: 'var(--text-3)', fontSize: 12 }}>{mod.path}</dd>
           </dl>
         </div>
@@ -941,31 +996,31 @@ export default function ModDetailModal({
         <div className="modal-foot">
           <button className="btn sm" onClick={pickCover}>
             <IconImage size={14} />
-            设置封面
+            {t('modal.setCover')}
           </button>
           <button className="btn sm" onClick={() => api.openModFolder(mod.path.replace(/[\\/]filelist\.xml$/i, ''))}>
             <IconFolder size={14} />
-            打开文件夹
+            {t('modal.openFolder')}
           </button>
           {mod.source === 'workshop' && (
             <button className="btn sm" onClick={() => api.getWorkshopPage(mod.id)}>
               <IconExternal size={14} />
-              工坊页面
+              {t('modal.workshopPage')}
             </button>
           )}
           {cp && (
             <>
               <button className="btn sm" onClick={doCopyToLocal}>
                 <IconDownload size={14} />
-                复制为新本地 mod
+                {t('modal.copyToLocal')}
               </button>
               <button
                 className={`btn sm ${confirmOverwrite ? 'danger' : ''}`}
                 onClick={doOverwrite}
-                title="会用创意工坊版本覆盖本地文件夹（自动备份）"
+                title={t('modal.overwriteTip')}
               >
                 <IconCopy size={14} />
-                {confirmOverwrite ? '再点一次确认覆盖' : '用工坊版覆盖本地'}
+                {confirmOverwrite ? t('modal.overwriteConfirm') : t('modal.overwriteLocal')}
               </button>
             </>
           )}
@@ -975,10 +1030,10 @@ export default function ModDetailModal({
               onClick={() =>
                 confirmDeleteLocal ? setConfirmDeleteLocal(false) : void openDeleteLocal()
               }
-              title="删除这个本地 mod，连它的历史快照一起"
+              title={t('modal.deleteLocalTip')}
             >
               <IconTrash size={14} />
-              {confirmDeleteLocal ? '取消删除' : '删除本地 mod'}
+              {confirmDeleteLocal ? t('modal.cancelDelete') : t('modal.deleteLocal')}
             </button>
           )}
         </div>

@@ -26,7 +26,8 @@ import type {
   BrowseResult,
   BrowseTagsResult,
   WorkshopMedia,
-  WorkshopSort
+  WorkshopSort,
+  WorkshopUpdateInfo
 } from './types';
 import { buildMockScan, mockCategories, mockModlists, mockSettings } from './mock';
 import { autoCategorize } from './categories';
@@ -157,11 +158,14 @@ function prevVersion(v: string | null | undefined): string {
   return parts.join('.');
 }
 
-const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.settings }),
+const mockApi = {
+  getSettings: async (): Promise<AppSettings> => ({ ...state.settings }),
   saveSettings: async (s: AppSettings): Promise<ScanResult> => {
     state.settings = { ...s };
     return mockApi.scan();
   },
+  // 预览模式没有主进程可告知，直接回显
+  setUiLang: async (lang: string): Promise<string> => lang,
   pickFolder: async (_title?: string): Promise<string | null> => null,
   pickFile: async (_title?: string, _filters?: unknown): Promise<string | null> => null,
   pathExists: async (_p: string): Promise<boolean> => true,
@@ -437,6 +441,17 @@ const mockApi = {  getSettings: async (): Promise<AppSettings> => ({ ...state.se
   updaterDownload: async (): Promise<UpdateState> => mockUpdateState(),
   updaterInstall: async (): Promise<boolean> => false,
   onUpdaterEvent: (_cb: (s: UpdateState) => void): (() => void) => () => {},
+  // 预览模式（浏览器里跑）没有工坊目录可查
+  workshopUpdateCheck: async (): Promise<WorkshopUpdateInfo> => ({
+    checked: false,
+    found: false,
+    id: null,
+    dir: null,
+    workshopVersion: null,
+    currentVersion: '',
+    newer: false,
+    reason: '预览模式'
+  }),
 
   // 预览模式下只是把示例数据装出来给界面看
   launchGame: async (): Promise<{ ok: boolean; via: string }> => ({ ok: true, via: 'preview' }),
