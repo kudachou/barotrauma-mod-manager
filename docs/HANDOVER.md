@@ -65,23 +65,54 @@ pnpm exec electron scripts/test-share-ui.cjs     # 合集导入导出 + 未订�
 pnpm exec electron scripts/test-browse-ui.cjs    # 浏览工坊：没 key / key 失效（15）
 pnpm exec electron scripts/test-compare-ui.cjs   # 本地↔工坊互操作：覆盖/复制/删 mod（61），含越界删除防护
 pnpm exec electron scripts/test-csp.cjs          # CSP 不拦界面需要的资源（工坊图要走 CDN，12）
+pnpm exec electron scripts/test-i18n-ui.cjs      # 界面语言：工坊版可切/记得住，完整版锁死中文
+pnpm exec electron scripts/test-collections-ui.cjs # 合集页列表/卡片两种视图 + 不重叠（32）
 node scripts/compare-mod-dirs.cjs "<A>" "<B>"    # 诊断：两个 mod 目录是否字节一致
 ```
 
 - `test-*.cjs` 用**隔离的 `userData` + 临时目录**跑真实 IPC，**不会**碰游戏目录。
 - 要指定目录时可用环境变量 `BMM_GAME_DIR` / `BMM_WORKSHOP_DIR`。
 - 截图脚本用 `BMM_NO_COVERS=1` 保证截图里不出现工坊封面（版权考虑，用户明确要求）。
+- **`test-i18n-ui.cjs` 测的是"当前 dist 是哪个变体"，所以先构建再跑**：
+  `$env:BMM_VARIANT='workshop'; pnpm run build` 之后跑，它测工坊版；
+  不设变量构建则测完整版。它自己会从设置页有没有语言选择器判断是哪种。
 
 ### 1.4 发布流程（README 里也有）
 
+**两条构建线**，共用一个版本号，靠文件名里的 `workshop` 区分：
+
+| 线 | 命令 | 产物 |
+| --- | --- | --- |
+| 完整版 | `pnpm run pack:full` | `release\barotrauma-mod-manager-setup-<v>.exe` + `latest.yml` |
+| 创意工坊版 | `pnpm run pack:workshop` | `release-ws\barotrauma-mod-manager-workshop-setup-<v>.exe`（**无** `latest.yml`） |
+
+两者打完都会**自动校验产物**（`scripts/lib/verify-package.cjs`）：asar 不得混入仓库垃圾、
+变体标记必须就位、`latest.yml` 必须指向正确的那条线。不合格则构建以非 0 退出。
+
 1. 改 `package.json` 的 `version`（先确认这个版本号 GitHub 上还不存在）。
-2. `pnpm run pack` → `release\barotrauma-mod-manager-setup-<version>.exe`。
+2. 跑上面对应的命令。
 3. `git commit` + 打 tag `v<version>` → 推。
-4. 建 Release：**不要**勾 prerelease、不要 draft；上传 exe + `latest.yml`（`.blockmap` 可选，0.4.0 就没传，只影响差分更新）。
+4. 建 Release：**不要**勾 prerelease、不要 draft。
+   - 完整版：上传 exe + **`latest.yml`**（`.blockmap` 可选，只影响差分更新）。
+   - 工坊版：**只传那个 exe**。
 5. 老客户端下次启动会自动更新（`updater.js` + `electron-updater`）。
 
+> ⚠️ **工坊版绝对不能传 `latest.yml`。**
+> 两个构建各自生成的 `latest.yml` **同名**，而一个 Release 只能有一个。
+> 工坊版没有自更新（主进程不注册 updater 的 IPC），那份文件对它毫无用处；
+> 一旦传上去就会**覆盖完整版的更新清单**，把所有完整版老用户"更新"成功能被砍掉的工坊版 ——
+> 静默且不可逆。构建脚本已经会删掉它并断言它不存在，但发布时仍要按上面第 4 条来。
+
+> ⚠️ **`release/` 和 `release-ws/` 必须分开。** 两条线共用输出目录时，后跑的那条会把
+> `win-unpacked` 和 `latest.yml` 一起改写掉（`directories` 在 `--config` 覆盖时是**替换**语义，
+> 必须在 `electron-builder.workshop.yml` 里重写）。
+
+如果只是为了修 `latest.yml`，**不要重新打包**：完整版那份以 GitHub Release 上的为准，
+用 `scripts/tmp-fetch-latest-yml.cjs` 取回来覆盖本地即可（它会比对 sha256）。
+
 **推送由用户手动做。** 本机 `git push` 被 Windows schannel 拦（TLS 握手失败），
-所以流程一直是：我提交 → 用户推。别在这上面浪费时间反复重试。
+可用 `git -c http.sslBackend=openssl push origin main --follow-tags` 绕过（需提权，
+Git for Windows 要 fork `sh` 建命名管道）。流程一直是：我提交 → 用户推。
 
 ### 1.5 版本历史
 
@@ -90,6 +121,48 @@ node scripts/compare-mod-dirs.cjs "<A>" "<B>"    # 诊断：两个 mod 目录是
 `updater.js` 里 `isPrerelease()`（版本号含 `-`）会让**预发布版不检查更新**——用于 beta 阶段避免打扰正式版用户，现在是正式版所以不生效。
 
 ---
+
+### 1.6 界面多语言（i18n）
+
+**只有创意工坊版开放语言切换**（`features.languageSwitch`）。完整版锁死中文 ——
+因为主进程提示语还没走错误码、且 Browse 页未翻，放开会让用户看到中英混排。
+
+| 位置 | 作用 |
+| --- | --- |
+| `src/i18n.ts` | 核心 API（`t` / `TKey` / `getLang` / `setLang` / `detectLang` / `loadSavedLang` / `persistLang` / `localeTag`），以及**基础文案表**（外壳 / Mod 库 / 卡片 / 更新横幅 / toast） |
+| `src/i18n/settings.ts` | 设置页文案（`settings.` 前缀） |
+| `src/i18n/modals.ts` | 四个弹窗（`modal.` 前缀） |
+| `src/i18n/collections.ts` | 合集页（`collections.` 前缀） |
+| `src/i18n/saves.ts` | 存档页（`saves.` 前缀） |
+| `src/i18n/categories.ts` | 内置分类标签的**显示名**映射 |
+| `src/i18n/mainMessages.ts` | 主进程中文提示 → 英文（**过渡方案**，见下） |
+
+**加一条文案的做法**：在对应片段里给 `xxxZh` 加 key + 中文，再给 `xxxEn` 加同样的 key + 英文。
+**两边 key 不一致会 tsc 报错**，这是刻意设计的保护网。key 用所属画面的前缀，
+且**不要在两个片段里定义同名 key**（合并时后者静默覆盖前者）。
+
+**三条容易踩的规则**：
+
+1. **当"键"用的字符串不能翻译。** 中文不只是文案，有些还是**数据主键**：
+   - `LibraryView` 的分类筛选哨兵（`ALL_CATS`，以前直接用 `'全部'` 当状态值 —— 一翻就散架）；
+   - `categories.ts` 里 12 个内置分类 + 3 个附加分类：它们存在用户 `categories.json` 里、
+     也出现在 mod 的 `autoCategories` 里，翻了老用户标签全丢。**只翻显示名**（`categoryLabel`）。
+   - 用户自建标签是**用户数据**，永远不翻。
+2. **回调参数别叫 `t`。** 组件里 `tags.map((t) => …)` 会遮蔽 i18n 的 `t()`，
+   症状是 `Type 'String' has no call signatures`。已踩过两次（`ModCard`、`CollectionsView`）。
+3. **模块级常量里不能直接调 `t()`。** 例如 `SettingsView` 的 `ROWS` 存的是 `labelKey/hintKey`，
+   渲染时才 `t(...)` —— 因为 App 在 `useState` 初始化里才 `setLang()`，模块求值发生在它之前，
+   直接调会把文案钉死在导入时的语言上。
+
+**语言怎么定**：`loadSavedLang()` 读 `localStorage['bmm.lang']`；没有就按系统语言
+**检测一次并立刻落盘**（`detectLang()`：`zh-*` → 中文（含繁体），其余 → 英文），之后不再跟随系统。
+切换语言靠 App 根节点 `key={lang}` 整树重挂，所以组件里直接 `t()` 即可，不需要 hooks。
+
+**日期/数字**用 `localeTag()`，不要硬编码 `'zh-CN'`。
+
+**主进程提示语**（约 40 条）目前是 `mainMessages.ts` 的**对照表**兜住的：不改主进程、
+不动 `test-backend.cjs` 那些比对中文串的断言。**主进程新增提示语必须同步加进那张表**，
+否则英文界面会漏出中文。正确做法是主进程改成返回错误码 + 参数 —— 那时这张表整体删掉。
 
 ## 2. 环境与硬约束（先读这节，能省几小时）
 

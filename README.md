@@ -58,6 +58,12 @@
   - 手动「创建快照」；此外每次覆盖工坊版、每次再次备份工坊 mod 之前都会自动留一份
 - **封面**：工坊 mod 自动拉取并缓存，之后离线可用；本地 mod 默认占位图，可手动指定
 
+**界面语言（创意工坊版）**
+- 设置里可切**中文 / English**，即时生效并记在本机
+- **首次启动按系统语言定**：简体/繁体中文 → 中文界面；其它语言一律英文。
+  之后不再跟随系统语言（想换就进设置里手动切）
+- 安装包与完整版分开：文件名带 `workshop` 的那个是创意工坊版（不索取 Steam Web API Key、无「浏览工坊」、更新由 Steam 工坊下发）
+
 ## 使用指南
 
 ### 安装
@@ -93,17 +99,63 @@
 
 ## 安全说明
 
+### 写游戏目录的时候，怎么保证不弄坏东西
+
 - **应用合集**：先备份再写，只动 `<contentpackages>` 段，段外逐字节不变，缺段则中止。
   备份固定在 `config_player.xml.bak` 一个文件上，每次应用覆盖，不在游戏目录里堆积。
 - **用创意工坊版覆盖本地**：先把本地文件夹**同盘改名**到 `LocalMods` 的**同级**目录
   `ModManagerBackups\`（改名是瞬时的，不占额外空间），失败会自动回滚。
 - **合集文件名**做了目录穿越拦截；「同步到游戏」「导入合集」也都只接受合法的 id / 文件名。
+  「覆盖本地版」「删除本地 mod」「删除快照」这类会删东西的操作，参数必须先通过路径边界校验
+  （只允许 `LocalMods` 的直接子项、快照 id 只允许本程序自己生成的格式），越界一律拒绝。
 - **备份与快照**都放在 `LocalMods` 的**同级**目录 `ModManagerBackups\`：`<mod 名>\<时间戳>\`。
   刻意不放进 `LocalMods`，避免被游戏当成 mod 扫描到；不要手改快照文件夹名（时间戳就是它的 id）。
   快照是完整副本，攒多了会占空间，可在详情页逐个删除。
-- 本工具自身的设置数据存在 `%AppData%\潜渊症Mod管理器\`：`settings.json`、`categories.json`、
-  `previews\`（封面缓存）、`covers\`（手动设置的封面）、`workshop\`（工坊详情缓存）。
-  只在本机，不上传；Steam Web API Key 也存在这里。
+
+### 这个程序会碰什么（access & privacy）
+
+一条原则：**只做完成功能必须做的事，能只读就不写，能不碰系统就不碰。**
+
+| 操作 | 用途与范围 |
+| --- | --- |
+| 定位安装位置 | 只 `Test-Path` 几个常见 Steam 路径（各盘符的 `Steam` / `SteamLibrary` / `Games\Steam`、`Program Files`），命中即停；再读 `libraryfolders.vdf` 找出你声明的游戏库。**找不到就让你在设置里手填** |
+| 本地读取 | 你选定的游戏目录、当前用户的 Barotrauma mod / 配置目录、工坊订阅目录与 `.acf`、`.save` 存档。解析 mod 的 `filelist.xml` 与 XML 定义；**不执行任何 mod 代码** |
+| 判断游戏是否在运行 | **不枚举进程、也不主动去试文件句柄**。做法是：动手改文件时如果 Windows 报 `EBUSY / EPERM`，就把它翻译成"文件被占用（游戏正在运行）—— 关掉游戏后重试"。这是**从错误反推**，不是去查系统：它无法知道是哪个进程占用，也无法检查另一个安装 |
+| 联网（只在你操作时） | 工坊浏览 / 详情 / 封面（Steam 官方 Web API + 工坊页面）、描述翻译、检查更新。启动与「重新扫描」**只读本地文件，不联网** |
+| 写盘 | 你请求的改动 + 本工具自己的数据：`%AppData%\潜渊症Mod管理器\` 下的 `settings.json`、`categories.json`、`relations.json`、`steam-api-key.json`、`workshop-checks.json`、`steam-api-host.json`、`previews\`（封面缓存）、`covers\`（手动封面）、`workshop\` / `workshop-pages\`（详情与页面缓存）、`translations\`（机翻缓存）。**全部只在本机，不上传** |
+| 启动其它程序 | 只有你点的时候：启动游戏、在 Steam 里打开工坊页、用系统浏览器打开链接、打开 mod/存档文件夹。「打开路径」只允许**目录**，不接受文件（避免被用来启动可执行文件） |
+
+**明确不做的事：**
+
+- **不枚举系统进程**、不读别的进程内存、不结束任何进程。
+- **不写注册表**、不读浏览器数据、不读你的账号凭据。
+- **不需要管理员权限**，全程不弹 UAC：安装包是**按用户安装**（`perMachine=false`、`allowElevation=false`），
+  构建里也没有 `requestedExecutionLevel`。
+- 没有遥测、没有自动上报、**没有任何数据回传**：本程序连自己的服务器都没有。
+
+**联网时数据会去哪里：**
+
+- `api.steampowered.com` / `community.steam-api.com`（工坊接口）、`steamcommunity.com`（工坊页面）、
+  `images.steamusercontent.com`（封面与截图）、`api.mymemory.translated.net`（机翻）、
+  GitHub（检查更新）。
+- 工坊封面与截图是**渲染层直接从 Steam 的图片 CDN 加载**的，其余外部数据都由主进程获取后落本地缓存。
+- 唯一会把**内容本身**发出去的功能是「翻译成中文」：点了它，描述文本会发给 MyMemory（第三方免费服务）。
+  不点就不发。
+
+**限制（别误以为这是沙箱）：** 以上都是本程序代码层面的约束，**不是操作系统的隔离**。
+mod 自己的代码是在游戏里运行的，不受本工具控制；本工具也不会去限制别的程序。
+另外判断"文件被占用"和真的去改文件之间有天然的时间差，所以改之前请关掉游戏、并留好备份。
+
+### Steam Web API Key
+
+- 只有「工坊下架检查」和「浏览工坊」需要它，**其余功能不需要**。
+- Key **只存在你自己的机器上**（`%AppData%\潜渊症Mod管理器\steam-api-key.json`，明文），
+  请求直接从你的机器发往 Steam，**不经过任何中转服务器，我们没有服务器**。
+- 只读取公开的工坊条目信息（标题、描述、标签、封面、订阅数等）；**不调用任何需要账号授权的接口**，
+  也接触不到你的账号、密码或库存。
+- 使用它受 [Steam Web API Terms of Use](https://steamcommunity.com/dev/apiterms) 约束（每天 10 万次调用上限、
+  不得暗示 Valve 背书、不得共享 Key 等）；建议在[申请页](https://steamcommunity.com/dev/apikey)把用途写成
+  「个人使用的 mod 管理器」。
 
 ## 常见问题
 
@@ -127,7 +179,10 @@ A：说明它在 Steam 订阅目录里、但游戏还没把它装到 `WorkshopMo
 
 **Q：「浏览工坊」提示连不上 Steam / 需要 API Key？**
 A：这个页面用的是 Steam 官方接口：需要先在 [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey)
-   申请一个 Key（域名随便填 localhost）填到「设置」里，且**本机能访问 Steam**（国内一般要开加速器）。
+   申请一个 Key 填到「设置」里，且**本机能访问 Steam**（国内一般要开加速器）。
+   申请时「域名」和邮箱请**如实填写**（域名可以填 `localhost`，但要填一个真实可用的邮箱）——
+   填虚假信息属于违反 [Steam Web API Terms of Use](https://steamcommunity.com/dev/apiterms)，
+   有被停用 Key 的风险；用途写「个人使用的 mod 管理器」即可。
 
 **Q：翻译按钮翻了但读起来怪？**
 A：只有作者**没提供中文描述**的 mod 才需要机翻（作者写了中文会直接用他的原文）。
