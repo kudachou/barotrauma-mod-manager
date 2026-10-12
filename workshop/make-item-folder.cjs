@@ -74,9 +74,11 @@ if (marker.version !== version) {
 if (marker.app !== 'barotrauma-mod-manager') {
   problems.push(`bmm-app.json 的 app=${marker.app}，程序认的是 barotrauma-mod-manager`);
 }
-if (pub.version !== version) {
-  problems.push(`publication.json 的 version=${pub.version}，package.json 是 ${version}`);
-}
+/*
+ * `publication.json` 的 `version` 是**已发布版本**的记录，不是构建输入 —— 所以**不**跟
+ * package.json 比。两者本来就会不一致：主版本升到 0.4.3 时，工坊版可能刻意先不跟着发
+ *（Steam 条目与 release-ws 里的包仍是 0.4.2）。要校验的是下面这两个真正进包的文件。
+ */
 // 当 mod 启用也必须无害：corepackage=False 且不声明任何 <Item>
 if (!/corepackage="False"/.test(filelist)) {
   problems.push('filelist.xml 必须是 corepackage="False"（否则玩家误启用会真的去当 mod 加载）');

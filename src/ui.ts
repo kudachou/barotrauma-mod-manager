@@ -1,8 +1,26 @@
 import type { ModInfo } from './types';
-import { localeTag } from './i18n';
+import { localeTag, t } from './i18n';
 
 export function modKey(m: ModInfo): string {
   return `${m.source}:${m.id}`;
+}
+
+/**
+ * 订阅数/收藏数/浏览数这类大数字缩写。
+ *
+ * 以前有三个各自的副本（BrowseView / BrowseDetailModal / ModDetailModal），
+ * 而且**行为不一致**：只有 ModDetailModal 那份有 `if (!n)` 守卫，
+ * 于是同一个数字在列表里显示 `NaN`、在详情弹窗里显示 `0`。
+ * 统一到这里，顺便把守卫带上（拿不到数据时显示 0 而不是 NaN）。
+ */
+export function fmtCount(n: number | null | undefined): string {
+  const v = Number(n);
+  if (!v || Number.isNaN(v)) return '0';
+  if (v >= 10000) {
+    return t('common.countWan', { n: (v / 10000).toFixed(1), k: (v / 1000).toFixed(1) });
+  }
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  return String(v);
 }
 
 export function fmtDate(ms: number | null | undefined): string {

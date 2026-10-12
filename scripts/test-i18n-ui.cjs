@@ -2,9 +2,10 @@
  * 界面语言（i18n）自检。
  *
  * 覆盖两种变体，用同一套断言：
- *   - 创意工坊版：设置里有语言选择器，切到 English 后整个界面变英文，且**重启后记得住**
- *   - 完整版：没有语言选择器，即使 localStorage 里被人写进 'en' 也仍然锁死中文
- *     （原因见 src/features.ts 的 languageSwitch 注释：浏览工坊页未翻 + 主进程提示语走对照表）
+ *   - 两个变体**都有**语言选择器（0.4.3 起完整版也开了）：设置里切到 English 后整个界面变英文，
+ *     且**重启后记得住**；切回中文也正常
+ *   - 变体靠"侧栏有没有「浏览工坊」入口"区分（只有完整版有）
+ *   - 完整版额外验一次 BrowseView 本身是英文（那是 0.4.3 才翻完的界面）
  *
  * 具体测哪种，取决于 dist 是用哪个变体构建的。脚本自己探测：设置页里有没有语言面板。
  *
@@ -158,15 +159,22 @@ app.whenReady().then(async () => {
   ok(zhDefault || enDefault, '侧栏渲染出了导航项', JSON.stringify(navs0));
   ok(!(zhDefault && enDefault), '不会中英混排');
 
-  // ---- 2) 设置页里有没有语言选择器（= 这个 dist 是工坊版还是完整版）----
+  // ---- 2) 语言选择器：**两个变体都有**（0.4.3 起完整版也开了）----
   await js(goNav(zhDefault ? '设置' : 'Settings'));
   await sleep(800);
   const settingsText = await js(`(document.querySelector('.settings') || {}).textContent || ''`);
   const hasSwitcher = settingsText.includes('界面语言') || settingsText.includes('Interface language');
-  console.log(`  变体判定: ${hasSwitcher ? '创意工坊版（有语言选择器）' : '完整版（锁死中文）'}`);
+  ok(hasSwitcher, '设置页里有语言选择器（两个变体都有）');
 
-  // ---- 3A) 工坊版：切到 English，界面应整体变英文 ----
-  if (hasSwitcher) {
+  /*
+   * 变体怎么认：**不能再靠"有没有语言选择器"**（0.4.3 起两个变体都有），
+   * 改成看侧栏有没有「浏览工坊」——那是只有完整版才有的功能入口。
+   */
+  const hasBrowseNav = navs0.some((n) => n.startsWith('浏览工坊') || n.startsWith('Browse Workshop'));
+  console.log(`  变体判定: ${hasBrowseNav ? '完整版（有浏览工坊入口）' : '创意工坊版（无浏览工坊入口）'}`);
+
+  // ---- 3) 切到 English，界面应整体变英文 ----
+  {
     const clicked = await js(`
       (() => {
         const b = Array.from(document.querySelectorAll('.settings .panel .seg button'))
@@ -185,7 +193,7 @@ app.whenReady().then(async () => {
     ok(!navsEn.some((n) => n.startsWith('Mod 库')), '中文项已消失（不是中英混排）');
     ok(
       !navsEn.some((n) => n.startsWith('浏览工坊')),
-      '工坊版没有「Browse Workshop」之外的中文残留'
+      '没有任何中文导航残留'
     );
 
     const titleEn = await js(PAGE_TITLE);
@@ -193,6 +201,25 @@ app.whenReady().then(async () => {
 
     const stored = await js(`localStorage.getItem('bmm.lang')`);
     ok(stored === 'en', '语言已写入 localStorage', String(stored));
+
+    /*
+     * 完整版特有的两个界面（BrowseView / BrowseDetailModal）是 0.4.3 才翻完的，
+     * 所以这里专门验一次「浏览工坊」页本身 —— 不联网也能验标题和搜索框。
+     */
+    if (hasBrowseNav) {
+      await js(goNav('Browse Workshop'));
+      await sleep(900);
+      const bTitle = await js(`(document.querySelector('.page-title') || {}).textContent || ''`);
+      ok(
+        /Browse/.test(bTitle) && !/[\u4e00-\u9fff]/.test(bTitle),
+        '完整版：浏览工坊页标题是英文（0.4.3 新翻）',
+        bTitle
+      );
+      const ph = await js(
+        `(() => { const i = document.querySelector('input[placeholder]'); return i ? i.placeholder : ''; })()`
+      );
+      ok(ph.length > 0 && !/[\u4e00-\u9fff]/.test(ph), '完整版：浏览工坊搜索框提示是英文', ph);
+    }
 
     // ---- 4) 重载后记得住 ----
     await win.webContents.reload();
@@ -220,18 +247,14 @@ app.whenReady().then(async () => {
     await sleep(1000);
     const navsZh = await js(NAVS);
     ok(navsZh.some((n) => n.startsWith('Mod 库')), '切回中文后侧栏恢复', JSON.stringify(navsZh));
-  } else {
-    // ---- 3B) 完整版：即使硬写 lang=en 也必须还是中文 ----
-    await js(`localStorage.setItem('bmm.lang', 'en')`);
-    await win.webContents.reload();
-    await sleep(2200);
-    const navs = await js(NAVS);
-    console.log('  写入 en 之后导航: ' + JSON.stringify(navs));
-    ok(navs.some((n) => n.startsWith('Mod 库')), '完整版锁死中文（忽略 localStorage 的 en）', JSON.stringify(navs));
-    ok(
-      !settingsText.toLowerCase().includes('interface language'),
-      '完整版设置里没有语言选择器'
-    );
+    // 完整版切回中文后，「浏览工坊」入口也要跟着回来
+    if (hasBrowseNav) {
+      ok(
+        navsZh.some((n) => n.startsWith('浏览工坊')),
+        '完整版切回中文后「浏览工坊」入口恢复中文',
+        JSON.stringify(navsZh)
+      );
+    }
   }
 
   // ---- 5) 没有渲染层报错 ----

@@ -1468,6 +1468,90 @@ async function tail() {
     });
     ok(!quota.ok && /额度/.test(quota.error), '把「配额用完」的警告文本识别成失败，而不是当成译文');
 
+    /*
+     * 翻译的目标语言 = 当前界面语言。
+     *
+     * 这一节守的是两个**实测出来的坑**（见 translate.js 文件头）：
+     *   1. 源语言必须 `Autodetect`。原来写死 `en|zh-CN`，目标改成英文就成了 `en|en`，
+     *      MyMemory 会返回 `PLEASE SELECT TWO DISTINCT LANGUAGES`（HTTP 200）当译文。
+     *   2. 缓存必须按目标语言分开。否则英文界面会拿到中文界面缓存的译文。
+     */
+    console.log('\n[20] 机器翻译的目标语言与缓存隔离');
+
+    ok(tr.normalizeTarget('en') === 'en', "界面语言 'en' → 目标 'en'");
+    ok(tr.normalizeTarget('en-US') === 'en', "'en-US' 也归一成 'en'");
+    ok(tr.normalizeTarget('zh') === 'zh-CN', "界面语言 'zh' → 目标 'zh-CN'");
+    ok(tr.normalizeTarget('zh-TW') === 'zh-CN', '繁体也落中文（界面只有中英两套）');
+    ok(tr.normalizeTarget(undefined) === 'zh-CN', '拿不到界面语言时默认中文');
+
+    const urlEn = tr.mymemoryUrl('hello', 'en');
+    const urlZh = tr.mymemoryUrl('hello', 'zh-CN');
+    ok(/langpair=Autodetect%7Cen\b/.test(urlEn), `英文目标用 Autodetect|en（实际 ${urlEn.slice(0, 70)}）`);
+    ok(/langpair=Autodetect%7Czh-CN/.test(urlZh), '中文目标用 Autodetect|zh-CN（源语言别写死 en）');
+    ok(!/langpair=en%7Cen/.test(urlEn), '绝不能出现 en|en（MyMemory 会返回 403 报错文本）');
+
+    const distinct = await tr.translateText('hello', {
+      target: 'en',
+      translateChunk: async () => 'PLEASE SELECT TWO DISTINCT LANGUAGES'
+    });
+    ok(!distinct.ok && !!distinct.error, '「两种语言必须不同」的报错也要判为失败，不能当成译文');
+    ok(!/DISTINCT LANGUAGES/.test(distinct.text || ''), '报错文本不会进译文');
+
+    // 缓存隔离：同一段文本、两个目标语言 → 两份缓存，互不串味
+    const cacheDir20 = path.join(TMP, 'translate-cache');
+    let calls20 = 0;
+    const firstZh = await tr.translateText('same text', {
+      target: 'zh-CN',
+      cacheDir: cacheDir20,
+      translateChunk: async (c) => {
+        calls20++;
+        return `中文:${c}`;
+      }
+    });
+    ok(firstZh.ok && firstZh.text === '中文:same text' && !firstZh.cached, '中文目标先翻一次并写缓存');
+    const againZh = await tr.translateText('same text', {
+      target: 'zh-CN',
+      cacheDir: cacheDir20,
+      translateChunk: async () => '不该被调用'
+    });
+    ok(againZh.cached === true, '同目标第二次命中缓存');
+    const firstEn = await tr.translateText('same text', {
+      target: 'en',
+      cacheDir: cacheDir20,
+      translateChunk: async (c) => {
+        calls20++;
+        return `EN:${c}`;
+      }
+    });
+    ok(
+      firstEn.ok && firstEn.text === 'EN:same text' && !firstEn.cached,
+      '同一个描述换英文目标要**重新翻译**，不能复用中文缓存'
+    );
+    ok(calls20 === 2, `两个目标语言各请求一次（实际 ${calls20} 次）`);
+
+    const cacheFiles = fs.readdirSync(cacheDir20).sort();
+    ok(cacheFiles.length === 2, `缓存按目标语言分开存成两个文件（实际 ${cacheFiles.join(', ')}）`);
+    ok(cacheFiles.some((f) => f.endsWith('.en.json')), '英文目标的缓存文件名带 .en（中文的保持原样，升级不失效）');
+
+    /*
+     * 工坊详情的请求语言也必须跟随界面。
+     *
+     * 原来的 bug：`getWorkshopDetails` 写死 `language = 6`（简体中文），于是英文界面
+     * 向 Steam 要的还是中文描述；又因为交回来的东西被标成 `localized`，
+     * 界面把它当成"已经是你的语言"，**连翻译按钮都不给**。
+     */
+    console.log('\n[21] 工坊详情的请求语言跟随界面');
+    const steam = require('../electron/services/steam');
+    ok(steam.steamLangCode('zh') === 6, "中文界面 → language=6（简体中文，原有实测值）");
+    ok(steam.steamLangCode('en') === 0, '英文界面 → language=0（英文）');
+    ok(steam.steamLangCode('en-US') === 0, 'en-US 也归一成英文');
+    ok(steam.steamLangCode('zh-TW') === 6, '繁体走中文（界面只有中英两套）');
+    ok(steam.steamLangCode(undefined) === 6, '拿不到界面语言时默认中文（保持旧行为）');
+    ok(
+      steam.steamLangCode('en') !== 6,
+      '英文界面绝不能再用 language=6 —— 否则拿回中文描述还当成"本地化好了"'
+    );
+
     /* ---- 合集的导出 / 导入 ---- */
     console.log('\n[18] 合集导出与导入');
 

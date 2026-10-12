@@ -52,8 +52,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // 工坊详情（描述 / 标签 / 热度）；配了 API Key 时描述会是中文（本地化版本）
   getWorkshopDetails: (id, force) => invoke('workshop:details', id, force),
-  // 把描述翻译成中文（作者没提供中文版时用）
-  translateText: (text) => invoke('translate:text', text),
+  // 把描述机器翻译成当前界面语言（作者没提供该语言版本时用）
+  translateText: (text, lang) => invoke('translate:text', text, lang),
 
   // 刷新「工坊条目还在不在」的缓存
   refreshWorkshopChecks: () => invoke('workshop:refreshChecks'),

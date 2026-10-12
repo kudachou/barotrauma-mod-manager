@@ -31,7 +31,7 @@ Install once and you never touch the installer again. After Steam updates this i
 [h2]Access[/h2]
 [b]Reads[/b]: the Barotrauma folder you point it at, this user's mod and config folders, and Steam's manifest files. [b]Writes[/b]: only the game folders you choose, plus [code]%APPDATA%\潜渊症Mod管理器[/code]. Online features use Steam's public Workshop API and pages — [b]this edition needs no API key and does not include the Browse Workshop page[/b].
 
-[b]No process enumeration. No registry writes. No browser or credential access. No telemetry. No administrator rights.[/b] These are limits in our code, not an OS sandbox. Full list in the [url=https://github.com/kudachou/barotrauma-mod-manager#安全说明]README[/url].
+[b]No process enumeration. No registry writes. No browser or credential access. No telemetry. No administrator rights.[/b] These are limits in our code, not an OS sandbox. Full list in the [url=https://github.com/kudachou/barotrauma-mod-manager/blob/main/README.en.md]README[/url].
 
 [h2]Feedback[/h2]
 Comments or [url=https://github.com/kudachou/barotrauma-mod-manager/issues]GitHub Issues[/url]. Please include the version, the steps you took, and the exact message you saw.

@@ -31,7 +31,7 @@
 [h2]权限说明[/h2]
 [b]读取[/b]：你指定的潜渊症目录、当前用户的 mod 与配置目录、Steam 的清单文件。[b]写入[/b]：只写你指定的游戏目录，以及 [code]%APPDATA%\潜渊症Mod管理器[/code]。联网只用 Steam 的公开工坊接口与页面——[b]本版不需要任何 API Key，也不含「浏览工坊」功能[/b]。
 
-[b]不枚举进程、不写注册表、不读浏览器或凭据、没有遥测、不需要管理员权限。[/b]这些是本程序的代码约束，不是操作系统沙箱。完整清单见 [url=https://github.com/kudachou/barotrauma-mod-manager#安全说明]README 的安全说明[/url]。
+[b]不枚举进程、不写注册表、不读浏览器或凭据、没有遥测、不需要管理员权限。[/b]这些是本程序的代码约束，不是操作系统沙箱。完整清单见 [url=https://github.com/kudachou/barotrauma-mod-manager/blob/main/README.md#安全说明]README 的安全说明[/url]。
 
 [h2]反馈[/h2]
 评论或 [url=https://github.com/kudachou/barotrauma-mod-manager/issues]GitHub Issues[/url]。请附上版本号、你的操作步骤，以及完整报错文字。

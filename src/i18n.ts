@@ -29,6 +29,8 @@ import { settingsZh, settingsEn } from './i18n/settings';
 import { modalsZh, modalsEn } from './i18n/modals';
 import { collectionsZh, collectionsEn } from './i18n/collections';
 import { savesZh, savesEn } from './i18n/saves';
+import { browseZh, browseEn } from './i18n/browse';
+import { browseDetailZh, browseDetailEn } from './i18n/browseDetail';
 
 export type Lang = 'zh' | 'en';
 
@@ -104,6 +106,11 @@ const baseZh = {
   'common.refresh': '刷新',
   'common.loading': '加载中…',
   'common.uncategorized': '未分类',
+  /**
+   * 订阅数之类的大数字：中文「万」，英文按千位 k。
+   * 调用处同时传 n（值）与 k（千位值），见 `src/ui.ts` 的 `fmtCount()`。
+   */
+  'common.countWan': '{n} 万',
 
   // ------------------------------ 侧栏 ------------------------------
   'nav.library': 'Mod 库',
@@ -270,6 +277,7 @@ const baseEn: Record<keyof typeof baseZh, string> = {
   'common.refresh': 'Refresh',
   'common.loading': 'Loading…',
   'common.uncategorized': 'Uncategorized',
+  'common.countWan': '{k}k',
 
   'nav.library': 'Mod Library',
   'nav.browse': 'Browse Workshop',
@@ -383,7 +391,9 @@ const zh = {
   ...settingsZh,
   ...modalsZh,
   ...collectionsZh,
-  ...savesZh
+  ...savesZh,
+  ...browseZh,
+  ...browseDetailZh
 } as const;
 
 const en: Record<keyof typeof zh, string> = {
@@ -391,7 +401,9 @@ const en: Record<keyof typeof zh, string> = {
   ...settingsEn,
   ...modalsEn,
   ...collectionsEn,
-  ...savesEn
+  ...savesEn,
+  ...browseEn,
+  ...browseDetailEn
 };
 
 /** 全部合法文案 key。组件里要声明"某个 key"类型的参数时用它，别手写字面量 union */

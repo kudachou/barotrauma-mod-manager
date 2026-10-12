@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { BrowseItem, WorkshopDetails, WorkshopMedia } from '../types';
 import { api } from '../api';
+import { getLang, t } from '../i18n';
+import { fmtCount, fmtDate } from '../ui';
 import { WorkshopText } from '../workshopText';
 import { IconAlert, IconClose, IconExternal, IconRefresh } from './Icons';
 
@@ -13,11 +15,7 @@ import { IconAlert, IconClose, IconExternal, IconRefresh } from './Icons';
  *   写了全尺寸 URL，不用跑 JS。
  */
 
-function humanCount(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
+/** 大数字统一用 `ui.fmtCount()`（原本三处各一份、行为还不一致） */
 
 function humanSize(bytes: number | null): string {
   const n = Number(bytes) || 0;
@@ -27,11 +25,9 @@ function humanSize(bytes: number | null): string {
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
-function fmtDate(sec: number | null): string {
-  if (!sec) return '—';
-  const d = new Date(sec * 1000);
-  const p = (x: number) => String(x).padStart(2, '0');
-  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`;
+/** 工坊接口给的时间戳是**秒**，`ui.fmtDate` 收毫秒、并按当前语言格式化 */
+function fmtDateSec(sec: number | null): string {
+  return fmtDate(sec ? sec * 1000 : null);
 }
 
 export default function BrowseDetailModal({
@@ -58,30 +54,58 @@ export default function BrowseDetailModal({
   const [showTranslated, setShowTranslated] = useState(true);
 
   const desc = details?.description || '';
-  /** 描述基本是中文吗（作者提供过中文版的话，这里就是中文，不用翻） */
-  const isChinese = /[\u4e00-\u9fff]/.test(desc)
-    ? (desc.match(/[\u4e00-\u9fff]/g) || []).length / Math.max(1, desc.length) >= 0.06
-    : false;
+  /*
+   * 描述区要"以界面语言为中心"判断，不能以中文为中心 ——
+   * 最初只有中文界面，所以逻辑是"描述不是中文就给翻译按钮"。
+   * 有了英文界面之后那样正好反了：对英文用户来说，**中文描述才是最需要翻译的情况**。
+   *
+   * 现在：描述看起来已经是当前界面语言 → 不用翻；否则给按钮。
+   * 已知不足：英文界面遇到俄文/日文描述也会被当成"已经是英文"（只有中英两种界面，
+   * 中文探测够用；真要做多语言得引入语言识别）。
+   */
+  const uiLang = getLang();
+  const chineseRatio = desc
+    ? (desc.match(/[\u4e00-\u9fff]/g) || []).length / Math.max(1, desc.length)
+    : 0;
+  const descLooksChinese = chineseRatio >= 0.06;
+  /**
+   * 描述是否已经是当前界面语言。
+   *
+   * ⚠️ **不能信 `details.localized`**：那个标记只表示"这份描述是用 language 参数请求回来的"，
+   * 而 Steam 在没有对应语言版本时会**退回基础语言**——所以作者只写了中文的条目，
+   * 请求英文也会拿到中文。曾经因此把中文描述当成"已经是你的语言"，连翻译按钮都不给。
+   * 只能看文本本身。
+   */
+  const descInUiLang = uiLang === 'zh' ? descLooksChinese : !descLooksChinese;
+  const needTranslate = !!desc && !descInUiLang;
 
   async function doTranslate() {
     if (translating || !desc) return;
     setTranslating(true);
     try {
-      const r = await api.translateText(desc);
+      const r = await api.translateText(desc, getLang());
       if (r && r.ok && r.text) {
         setTranslated(r.text);
         setShowTranslated(true);
         onToast(
           'ok',
-          '已翻译成中文',
-          r.cached ? '用的是上次的翻译结果' : `机器翻译（MyMemory）${r.chunks ? `，${r.chunks} 段` : ''} —— 专有名词可能不准`
+          t('browseDetail.translated'),
+          r.cached
+            ? t('browseDetail.translatedCached')
+            : t('browseDetail.mtToast', {
+                chunks: r.chunks ? t('browseDetail.mtChunks', { n: r.chunks }) : ''
+              })
         );
       } else {
-        onToast('warn', '翻译没成功', (r && r.error) || '翻译服务没有返回内容');
+        onToast(
+          'warn',
+          t('browseDetail.translateFailed'),
+          (r && r.error) || t('browseDetail.translateNoContent')
+        );
         setTranslated(r && r.text ? r.text : null);
       }
     } catch (e: any) {
-      onToast('err', '翻译失败', String(e?.message || e));
+      onToast('err', t('browseDetail.translateError'), String(e?.message || e));
     } finally {
       setTranslating(false);
     }
@@ -122,22 +146,22 @@ export default function BrowseDetailModal({
               {details?.title || item.title}
             </div>
             <div className="page-sub" style={{ marginTop: 4 }}>
-              {item.id} · 更新 {fmtDate(details?.timeUpdated || item.timeUpdated)} · 体积{' '}
-              {humanSize(details?.fileSize || item.fileSize)}
+              {item.id} · {t('browseDetail.updated', { date: fmtDateSec(details?.timeUpdated || item.timeUpdated) })} ·{' '}
+              {t('browseDetail.size', { size: humanSize(details?.fileSize || item.fileSize) })}
             </div>
           </div>
-          <button className="btn icon" onClick={onClose} title="关闭">
+          <button className="btn icon" onClick={onClose} title={t('common.close')}>
             <IconClose size={16} />
           </button>
         </div>
 
         <div className="modal-body">
-          {loading && !details && !media && <div className="bk-dim">正在读取工坊数据…</div>}
+          {loading && !details && !media && <div className="bk-dim">{t('browseDetail.loading')}</div>}
 
           {media?.missing && (
             <div className="warn-bar" style={{ marginBottom: 10 }}>
               <IconAlert size={16} />
-              <div>工坊页面上看不到这个条目了（可能已下架或被作者设为私有）。</div>
+              <div>{t('browseDetail.missing')}</div>
             </div>
           )}
 
@@ -151,7 +175,7 @@ export default function BrowseDetailModal({
               />
             ) : (
               <div className="cover-ph" style={{ height: '100%' }}>
-                没有预览图
+                {t('browseDetail.noPreview')}
               </div>
             )}
           </div>
@@ -164,7 +188,7 @@ export default function BrowseDetailModal({
                   key={s.full}
                   className={`ws-shot ${i === active ? 'on' : ''}`}
                   onClick={() => setActive(i)}
-                  title={`第 ${i + 1} 张`}
+                  title={t('browseDetail.shotIndex', { n: i + 1 })}
                 >
                   <img
                     src={s.thumb}
@@ -178,17 +202,24 @@ export default function BrowseDetailModal({
           )}
 
           <div className="ws-stats">
-            <span>👍 订阅 {humanCount(details?.subscriptions ?? item.subscriptions)}</span>
-            <span>★ 收藏 {humanCount(details?.favorited ?? item.favorited)}</span>
-            <span>👁 浏览 {humanCount(details?.views ?? item.views)}</span>
-            <span>创建 {fmtDate(details?.timeCreated || null)}</span>
+            <span>
+              {t('browseDetail.subscriptions', {
+                n: fmtCount(details?.subscriptions ?? item.subscriptions)
+              })}
+            </span>
+            <span>
+              {t('browseDetail.favorited', { n: fmtCount(details?.favorited ?? item.favorited) })}
+            </span>
+            <span>{t('browseDetail.views', { n: fmtCount(details?.views ?? item.views) })}</span>
+            <span>{t('browseDetail.created', { date: fmtDateSec(details?.timeCreated || null) })}</span>
           </div>
 
           {(details?.tags?.length || item.tags.length) > 0 && (
             <div className="card-tags" style={{ marginTop: 6 }}>
-              {(details?.tags?.length ? details.tags : item.tags).map((t) => (
-                <span className="tag" key={t}>
-                  {t}
+              {/* ⚠️ 循环变量不能叫 t —— 会遮蔽 i18n 的 t()（ModCard / CollectionsView 都踩过） */}
+              {(details?.tags?.length ? details.tags : item.tags).map((tag) => (
+                <span className="tag" key={tag}>
+                  {tag}
                 </span>
               ))}
             </div>
@@ -197,26 +228,38 @@ export default function BrowseDetailModal({
           {details?.banned && (
             <div className="warn-bar" style={{ marginTop: 10 }}>
               <IconAlert size={16} />
-              <div>这个条目在工坊上被标记为封禁：{details.banReason || '（无原因）'}</div>
+              <div>
+                {t('browseDetail.banned', {
+                  reason: details.banReason || t('browseDetail.bannedNoReason')
+                })}
+              </div>
             </div>
           )}
 
-          <div className="section-title">创意工坊描述</div>
+          <div className="section-title">{t('browseDetail.wsDescription')}</div>
           {details?.description ? (
             <>
               <div className="browse-note" style={{ marginTop: 0 }}>
-                {details.localized ? (
-                  <span className="badge st-backup-ok" title="作者提供了中文描述，直接用他的（不是机翻）">
-                    中文（作者提供）
+                {/*
+                  两个条件都要满足才敢说"作者提供了你的语言版本"：
+                  用 language 参数请求过（localized），**且**文本看起来确实是该语言。
+                  只看 localized 会把"Steam 退回基础语言（中文）"也标成作者提供了本地化版本。
+                */}
+                {details.localized && descInUiLang ? (
+                  <span
+                    className="badge st-backup-ok"
+                    title={t('browseDetail.authorZhTip')}
+                  >
+                    {t('browseDetail.authorZh')}
                   </span>
-                ) : isChinese ? (
-                  <span className="badge st-backup-ok">描述本身是中文</span>
+                ) : descInUiLang ? (
+                  <span className="badge st-backup-ok">{t('browseDetail.descIsZh')}</span>
                 ) : (
-                  <span className="badge st-older" title="作者没提供中文描述 —— 可以用机器翻译先看个大概">
-                    只有原文
+                  <span className="badge st-older" title={t('browseDetail.onlyOriginalTip')}>
+                    {t('browseDetail.onlyOriginal')}
                   </span>
                 )}
-                {!isChinese &&
+                {needTranslate &&
                   (translated ? (
                     <>
                       <button
@@ -224,10 +267,12 @@ export default function BrowseDetailModal({
                         style={{ marginLeft: 8 }}
                         onClick={() => setShowTranslated((v) => !v)}
                       >
-                        {showTranslated ? '看原文' : '看译文'}
+                        {showTranslated
+                          ? t('browseDetail.showOriginal')
+                          : t('browseDetail.showTranslation')}
                       </button>
                       <span className="bk-dim" style={{ marginLeft: 8 }}>
-                        机器翻译（MyMemory），专有名词可能不准
+                        {t('browseDetail.mtNote')}
                       </span>
                     </>
                   ) : (
@@ -236,25 +281,25 @@ export default function BrowseDetailModal({
                       style={{ marginLeft: 8 }}
                       disabled={translating}
                       onClick={() => void doTranslate()}
-                      title="用免费翻译接口（MyMemory）把整段描述翻成中文；结果会缓存，同一个 mod 只翻一次"
+                      title={t('browseDetail.translateTip')}
                     >
-                      {translating ? '正在翻译…' : '翻译成中文'}
+                      {translating ? t('browseDetail.translating') : t('browseDetail.translate')}
                     </button>
                   ))}
               </div>
               {translating && !translated && (
-                <div className="bk-dim">正在分块翻译，长描述要十几秒…</div>
+                <div className="bk-dim">{t('browseDetail.translatingLong')}</div>
               )}
               <WorkshopText
                 text={showTranslated && translated ? translated : details.description}
                 onOpenLink={(url) => {
-                  void api.openExternal(url).catch(() => onToast('err', '打不开链接', url));
+                  void api.openExternal(url).catch(() => onToast('err', t('browseDetail.linkOpenFailed'), url));
                 }}
               />
             </>
           ) : (
             <div className="bk-dim">
-              {loading ? '读取中…' : '这个条目没有描述，或者没能读到。'}
+              {loading ? t('browseDetail.reading') : t('browseDetail.noDescription')}
               {!loading && (
                 <button
                   className="btn sm"
@@ -265,13 +310,13 @@ export default function BrowseDetailModal({
                         const d = await api.getWorkshopDetails(item.id, true);
                         setDetails(d || null);
                       } catch (e: any) {
-                        onToast('err', '重新读取失败', String(e?.message || e));
+                        onToast('err', t('browseDetail.reloadFailed'), String(e?.message || e));
                       }
                     })();
                   }}
                 >
                   <IconRefresh size={13} />
-                  重新读取
+                  {t('browseDetail.reload')}
                 </button>
               )}
             </div>
@@ -281,14 +326,14 @@ export default function BrowseDetailModal({
         <div className="modal-foot">
           <button className="btn primary" onClick={() => onOpenInSteam(item)}>
             <IconExternal size={14} />
-            在 Steam 里打开
+            {t('browseDetail.openInSteam')}
           </button>
           <button className="btn" onClick={() => onOpenWeb(item)}>
-            网页版
+            {t('browseDetail.openInBrowser')}
           </button>
           <span className="spacer" />
           <button className="btn" onClick={onClose}>
-            关闭
+            {t('common.close')}
           </button>
         </div>
       </div>

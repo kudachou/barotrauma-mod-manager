@@ -26,7 +26,7 @@ const { installStatus, pendingSyncOf, planInstallSync, runInstallSync } = requir
 const { browse: browseWorkshop, browseTags: browseWorkshopTags } = require('./workshopbrowse');
 const { openWorkshopInSteam, ID_RE, assertWorkshopId } = require('./openinsteam');
 const { getMedia: getWorkshopMedia } = require('./workshoppage');
-const { translateToChinese } = require('./translate');
+const { translateText, normalizeTarget } = require('./translate');
 const {
   buildText: buildShareText,
   buildJson: buildShareJson,
@@ -70,6 +70,7 @@ const {
 const {
   fetchDetails,
   getWorkshopDetails,
+  steamLangCode,
   downloadPreview,
   cachedPreview,
   missFresh,
@@ -617,15 +618,25 @@ function registerIpc() {
     if (!FEATURES.browseWorkshop) throw new Error(DISABLED_REASON);
     return getWorkshopDetails(numId(id), path.join(userDataDir(), 'workshop'), {
       force: !!force,
-      // 配了 key 就拿**本地化（中文）**描述 —— 老接口永远只给英文，这就是
-      // 「管理器显示英文、Steam 显示中文」的原因
-      apiKey: getApiKey(userDataDir())
+      // 配了 key 才能拿本地化描述（老接口永远只给基础语言）——
+      // 语言**跟随界面**：英文界面要英文描述，中文界面要中文描述。
+      // 以前写死简中，于是英文用户看到中文描述、还被当成"已经是你的语言"。
+      apiKey: getApiKey(userDataDir()),
+      language: steamLangCode(uiLang())
     });
   });
 
-  /** 把描述翻译成中文（作者没提供中文版时的兜底） */
-  ipcMain.handle('translate:text', (_e, text) =>
-    translateToChinese(text, { cacheDir: path.join(userDataDir(), 'translations') })
+  /**
+   * 把描述机器翻译成**当前界面语言**（作者没提供该语言版本时的兜底）。
+   *
+   * 目标语言优先取渲染层传来的界面语言（它最权威：用户可能刚切过），
+   * 拿不到时退回主进程记录的 `uiLang()`。英文用户拿到英文译文，中文用户拿到中文。
+   */
+  ipcMain.handle('translate:text', (_e, text, lang) =>
+    translateText(text, {
+      target: normalizeTarget(lang || uiLang()),
+      cacheDir: path.join(userDataDir(), 'translations')
+    })
   );
 
   /** 联网刷新「工坊条目还在不在」的缓存（作者下架后就查不到了） */

@@ -41,16 +41,16 @@ export const features = {
   /**
    * 界面语言切换（中 / 英）。
    *
-   * 目前**只在创意工坊版**提供：它要面向国际用户上架。
+   * **两个变体都开**。之前完整版锁中文，是因为它独有的两个界面（浏览工坊
+   * `BrowseView` / `BrowseDetailModal`）还没翻 —— 放开会让英文用户看到中英混排。
+   * 0.4.3 把这两块补齐了，所以不再有区别。
    *
-   * 完整版为什么先锁中文：渲染层界面**已经全部翻完**（含窗口标题、分类显示名），
-   * 但还有两处没翻，放开会让用户看到中英混排：
-   *   1. `BrowseView` / `BrowseDetailModal`（浏览工坊整块，工坊版不渲染所以没翻）；
-   *   2. 主进程提示语的覆盖仍是"对照表"方案（`src/i18n/mainMessages.ts`），
-   *      主进程新增提示语若忘了加表就会漏中文。
-   * 这两件事做完再把这里改成 `true`。
+   * ⚠️ 遗留的一处不完美：主进程提示语的覆盖仍是"对照表"方案
+   *（`src/i18n/mainMessages.ts`）—— 主进程新增提示语若忘了加表，英文界面会漏出中文。
+   * 正解是主进程返回错误码、由渲染层翻译，但那要动 40 多处且 `test-backend.cjs`
+   * 有大量断言直接比对中文串。表已经是可接受的了，但加主进程提示语时记得同步加表。
    */
-  languageSwitch: isWorkshopBuild
+  languageSwitch: true
 } as const;
 
 export type Features = typeof features;

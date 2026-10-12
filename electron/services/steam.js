@@ -300,6 +300,17 @@ async function fetchDetails(ids, options = {}) {
 }
 
 /**
+ * 界面语言 → Steam `ELanguage` 码。
+ *
+ * 6 = 简体中文（见下面 `fetchLocalizedDetails` 的实测记录），0 = 英文。
+ * ⚠️ 以前**写死 6**：于是英文用户请求详情时，Steam 也返回中文描述 ——
+ * 界面明明切到了英文，描述却是中文，而且被当成"已经是你的语言"，连翻译按钮都不给。
+ */
+function steamLangCode(lang) {
+  return String(lang || '').toLowerCase().startsWith('en') ? 0 : 6;
+}
+
+/**
  * 用 `IPublishedFileService/GetDetails` 取**本地化**的标题与描述。
  *
  * 为什么需要它：老接口 `ISteamRemoteStorage/GetPublishedFileDetails` **没有 language 参数**，
@@ -312,8 +323,12 @@ async function fetchDetails(ids, options = {}) {
  *   Press R to Reload      默认 3445 字/0 中文   →  简中 1986 字/572 中文（标题也变成「按R换弹」）
  *   Barotraumatic          默认 5526 字/0 中文   →  简中 3189 字/1659 中文
  * ```
- * 没有中文版的条目会退回基础语言（LuaCs 就是），所以可以放心优先用它。
+ * 没有对应语言版本的条目会退回基础语言（LuaCs 就是），所以可以放心优先用它。
  * 代价：这个接口要 key（没 key 直接 403），没配 key 时只能退回老接口。
+ *
+ * ⚠️ 因为"没有对应语言版本时会退回基础语言"，**`localized: true` 只表示"这份是用 language
+ * 参数请求回来的"，不表示内容一定就是那个语言**。界面要判断"描述是不是已经是当前语言"
+ * 必须自己看文本（见 `BrowseDetailModal` 的 `descInUiLang`）。
  */
 async function fetchLocalizedDetails(ids, options = {}) {
   const { key, language = 6 } = options;
@@ -353,7 +368,7 @@ async function fetchLocalizedDetails(ids, options = {}) {
         banned: d.banned === 1 || d.banned === true,
         banReason: d.ban_reason || null,
         description: d.file_description || d.description || null,
-        /** 标记一下：这份是本地化过的（界面上可以据此说明） */
+        /** 这份是**用 language 参数**请求回来的。**不等于**内容就是该语言（见上方注释） */
         localized: true
       });
     }
@@ -543,6 +558,7 @@ module.exports = {
   probeHost,
   fetchDetails,
   fetchLocalizedDetails,
+  steamLangCode,
   getWorkshopDetails,
   downloadPreview,
   cachedPreview,

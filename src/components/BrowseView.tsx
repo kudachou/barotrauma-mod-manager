@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrowseItem, BrowseResult, ModInfo, WorkshopSort } from '../types';
 import { api, placeholderHue } from '../api';
-import { initials } from '../ui';
+import { fmtCount, initials } from '../ui';
+import { t, type TKey } from '../i18n';
 import { IconAlert, IconExternal, IconRefresh, IconSearch } from './Icons';
 import BrowseDetailModal from './BrowseDetailModal';
 
@@ -15,23 +16,18 @@ import BrowseDetailModal from './BrowseDetailModal';
  * 「同步到游戏」就能装进游戏 —— 那条链路已经做好了，不用额外依赖 SteamCMD。
  */
 
-const SORTS: { key: WorkshopSort; label: string }[] = [
-  { key: 'popular', label: '最热门' },
-  { key: 'trend', label: '趋势' },
-  { key: 'updated', label: '最近更新' },
-  { key: 'newest', label: '最新发布' },
-  { key: 'top', label: '口碑最好' }
+/** 存 labelKey 而不是写死文案：模块求值发生在 App 设置语言之前（见 docs/HANDOVER.md §1.6） */
+const SORTS: { key: WorkshopSort; labelKey: TKey }[] = [
+  { key: 'popular', labelKey: 'browse.sortPopular' },
+  { key: 'trend', labelKey: 'browse.sortTrend' },
+  { key: 'updated', labelKey: 'browse.sortUpdated' },
+  { key: 'newest', labelKey: 'browse.sortNewest' },
+  { key: 'top', labelKey: 'browse.sortTop' }
 ];
 
 const PER_PAGE = 24;
 /** 分类标签最多同时选几个（多个是 AND 关系，选太多容易筛到空） */
 const MAX_TAGS = 3;
-
-function humanCount(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
 
 function fmtDate(sec: number): string {
   if (!sec) return '—';
@@ -67,11 +63,18 @@ export default function BrowseView({
       const s = opts?.sort ?? sort;
       const q = opts?.search ?? search;
       const p = opts?.page ?? page;
-      const t = opts?.tags ?? selectedTags;
+      /* 别叫 `t`：会遮蔽 i18n 的 t()（docs/HANDOVER.md §1.6 规则 2） */
+      const tagFilter = opts?.tags ?? selectedTags;
       const my = ++seq.current;
       setLoading(true);
       try {
-        const r = await api.browseWorkshop({ sort: s, search: q, page: p, numPerPage: PER_PAGE, tags: t });
+        const r = await api.browseWorkshop({
+          sort: s,
+          search: q,
+          page: p,
+          numPerPage: PER_PAGE,
+          tags: tagFilter
+        });
         if (my !== seq.current) return; // 只认最后一次请求，避免翻页时旧结果盖上新结果
         setResult(r);
       } catch (e: any) {
@@ -139,7 +142,7 @@ export default function BrowseView({
     let next: string[];
     if (has) next = selectedTags.filter((x) => x !== tag);
     else if (selectedTags.length >= MAX_TAGS) {
-      onToast('warn', `最多同时选 ${MAX_TAGS} 个分类`, '多个分类是「同时满足」的关系，选太多会筛不到东西');
+      onToast('warn', t('browse.maxTags', { n: MAX_TAGS }), t('browse.maxTagsHint'));
       return;
     } else next = [...selectedTags, tag];
     setSelectedTags(next);
@@ -161,19 +164,15 @@ export default function BrowseView({
   async function openInSteam(it: BrowseItem) {
     try {
       const r = await api.openWorkshopInSteam(it.id);
-      if (!r || !r.ok) throw new Error((r && r.error) || '打不开 Steam');
-      onToast(
-        'info',
-        '已在 Steam 客户端里打开',
-        '在 Steam 里点「订阅」，下载完成后回到本管理器点顶栏「同步到游戏」即可装进游戏'
-      );
+      if (!r || !r.ok) throw new Error((r && r.error) || t('browse.cannotOpenSteam'));
+      onToast('info', t('browse.openedInSteam'), t('browse.openedInSteamHint'));
     } catch (e: any) {
       // Steam 那条路走不通就退回网页版，别让按钮变成死的
       try {
         await api.openExternal(it.pageUrl);
-        onToast('warn', '没能打开 Steam 客户端，已改用网页版', String(e?.message || e));
+        onToast('warn', t('browse.steamFallbackWeb'), String(e?.message || e));
       } catch (e2: any) {
-        onToast('err', '打不开工坊页面', String(e2?.message || e2));
+        onToast('err', t('browse.openPageFailed'), String(e2?.message || e2));
       }
     }
   }
@@ -181,9 +180,9 @@ export default function BrowseView({
   async function openWeb(it: BrowseItem) {
     try {
       await api.openExternal(it.pageUrl);
-      onToast('info', '已用浏览器打开工坊页面', '在那个页面上点「订阅」也一样有效');
+      onToast('info', t('browse.openedInBrowser'), t('browse.openedInBrowserHint'));
     } catch (e: any) {
-      onToast('err', '打不开工坊页面', String(e?.message || e));
+      onToast('err', t('browse.openPageFailed'), String(e?.message || e));
     }
   }
 
@@ -195,7 +194,7 @@ export default function BrowseView({
         <div className="search">
           <IconSearch size={14} />
           <input
-            placeholder="搜索工坊 mod（按标题/描述）…"
+            placeholder={t('browse.searchPlaceholder')}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => {
@@ -210,7 +209,7 @@ export default function BrowseView({
           />
           {searchInput && (
             <button className="btn sm" onClick={submitSearch}>
-              搜索
+              {t('browse.search')}
             </button>
           )}
         </div>
@@ -220,9 +219,9 @@ export default function BrowseView({
               key={s.key}
               className={`tag-toggle ${sort === s.key && !search ? 'on' : ''}`}
               onClick={() => changeSort(s.key)}
-              title={search ? '搜索时由 Steam 的相关度排序决定' : s.label}
+              title={search ? t('browse.sortSearchTip') : t(s.labelKey)}
             >
-              {s.label}
+              {t(s.labelKey)}
             </div>
           ))}
         </div>
@@ -231,18 +230,24 @@ export default function BrowseView({
 
         {result && !result.needsKey && !result.error && (
           <span className="browse-total">
-            共 {humanCount(result.total)} 个 · 第 {result.page} / {totalPages} 页
+            {t('browse.totalLine', {
+              total: fmtCount(result.total),
+              page: result.page,
+              pages: totalPages
+            })}
           </span>
         )}
         <button className="btn sm" onClick={() => void load()} disabled={loading}>
           <IconRefresh size={14} />
-          {loading ? '读取中…' : '刷新'}
+          {loading ? t('browse.loadingShort') : t('common.refresh')}
         </button>
       </div>
 
       {search && (
         <div className="browse-note">
-          正在搜索「<b>{search}</b>」
+          {t('browse.searchingPre')}
+          <b>{search}</b>
+          {t('browse.searchingPost')}
           <button
             className="btn sm"
             style={{ marginLeft: 8 }}
@@ -253,7 +258,7 @@ export default function BrowseView({
               void load({ search: '', page: 1 });
             }}
           >
-            清除
+            {t('browse.clear')}
           </button>
         </div>
       )}
@@ -263,67 +268,73 @@ export default function BrowseView({
           <div
             className={`tag-toggle ${selectedTags.length === 0 ? 'on' : ''}`}
             onClick={clearTags}
-            title="不按分类筛"
+            title={t('browse.clearTagFilterTip')}
           >
-            全部分类
+            {t('browse.allCategories')}
           </div>
-          {tags.map((t) => (
+          {tags.map((tag) => (
             <div
-              key={t.tag}
-              className={`tag-toggle ${selectedTags.includes(t.tag) ? 'on' : ''}`}
-              onClick={() => toggleTag(t.tag)}
-              title={`${t.count} 个热门条目带这个分类`}
+              key={tag.tag}
+              className={`tag-toggle ${selectedTags.includes(tag.tag) ? 'on' : ''}`}
+              onClick={() => toggleTag(tag.tag)}
+              title={t('browse.tagCountTip', { n: tag.count })}
             >
-              {t.tag}
-              <span className="browse-tag-count">{t.count}</span>
+              {tag.tag}
+              <span className="browse-tag-count">{tag.count}</span>
             </div>
           ))}
           {selectedTags.length > 0 && (
             <span className="browse-note" style={{ margin: 'auto 0 auto 6px' }}>
-              已选 {selectedTags.length}/{MAX_TAGS}（同时满足）
+              {t('browse.selectedTags', { n: selectedTags.length, max: MAX_TAGS })}
             </span>
           )}
         </div>
       )}
-      {tagsError && !tags.length && <div className="browse-note">分类没读到：{tagsError}</div>}
+      {tagsError && !tags.length && (
+        <div className="browse-note">{t('browse.tagsLoadFailed', { error: tagsError })}</div>
+      )}
 
       {result?.needsKey ? (
         <div className="empty" style={{ padding: 40 }}>
           <IconAlert size={26} />
-          <div className="empty-title">这个功能需要 Steam Web API Key</div>
+          <div className="empty-title">{t('browse.needKeyTitle')}</div>
           <div>
-            「浏览创意工坊」用的是官方查询接口 <code>IPublishedFileService/QueryFiles</code>，
-            不带 key 会被 Steam 拒绝（403）。
+            {t('browse.needKeyBody1')}
+            <code>IPublishedFileService/QueryFiles</code>
+            {t('browse.needKeyBody2')}
             <br />
-            去 <b>steamcommunity.com/dev/apikey</b> 免费申请一个（域名随便填 localhost），
-            填到「设置」里的 Steam Web API Key 就能用了。
+            {t('browse.needKeyBody3')}
+            <b>steamcommunity.com/dev/apikey</b>
+            {t('browse.needKeyBody4')}
             <br />
-            另外这个页面要能访问 Steam（国内一般需要开加速器），不然会一直「连不上 Steam」。
+            {t('browse.needKeyBody5')}
           </div>
           <div style={{ marginTop: 12 }}>
             <button className="btn primary" onClick={onGoSettings}>
-              去设置里填 Key
+              {t('browse.goSettingsForKey')}
             </button>
           </div>
         </div>
       ) : result?.error ? (
         <div className="empty" style={{ padding: 40 }}>
           <IconAlert size={26} />
-          <div className="empty-title">没读到工坊数据</div>
+          <div className="empty-title">{t('browse.loadFailedTitle')}</div>
           <div>{result.error}</div>
           <div style={{ marginTop: 12 }}>
             <button className="btn" onClick={() => void load()}>
-              重试
+              {t('common.retry')}
             </button>
           </div>
         </div>
       ) : loading && !result ? (
         <div className="empty" style={{ padding: 40 }}>
-          <div className="empty-title">正在读取创意工坊…</div>
+          <div className="empty-title">{t('browse.loadingWorkshop')}</div>
         </div>
       ) : result && result.items.length === 0 ? (
         <div className="empty" style={{ padding: 40 }}>
-          <div className="empty-title">{search ? '没搜到符合条件的 mod' : '没有结果'}</div>
+          <div className="empty-title">
+            {search ? t('browse.noSearchResults') : t('browse.noResults')}
+          </div>
         </div>
       ) : (
         <>
@@ -354,17 +365,17 @@ export default function BrowseView({
                     )}
                     <div className="cover-badges">
                       {owned ? (
-                        <span className="badge st-backup-ok" title="你的 mod 库里已经有这个条目了">
-                          已有
+                        <span className="badge st-backup-ok" title={t('browse.ownedTip')}>
+                          {t('browse.owned')}
                         </span>
                       ) : (
-                        <span className="badge" title="还没订阅">
-                          未订阅
+                        <span className="badge" title={t('browse.notSubscribedTip')}>
+                          {t('browse.notSubscribed')}
                         </span>
                       )}
-                      {it.tags.slice(0, 1).map((t) => (
-                        <span className="badge" key={t}>
-                          {t}
+                      {it.tags.slice(0, 1).map((tag) => (
+                        <span className="badge" key={tag}>
+                          {tag}
                         </span>
                       ))}
                     </div>
@@ -375,14 +386,16 @@ export default function BrowseView({
                       {it.title}
                     </div>
                     <div className="browse-meta">
-                      <span title="订阅数">👍 {humanCount(it.subscriptions)}</span>
-                      <span title="收藏数">★ {humanCount(it.favorited)}</span>
-                      <span title="最后更新">{fmtDate(it.timeUpdated)}</span>
+                      <span title={t('browse.subscriptionsTip')}>
+                        👍 {fmtCount(it.subscriptions)}
+                      </span>
+                      <span title={t('browse.favoritedTip')}>★ {fmtCount(it.favorited)}</span>
+                      <span title={t('browse.updatedTip')}>{fmtDate(it.timeUpdated)}</span>
                     </div>
                     <div className="card-tags">
-                      {it.tags.slice(0, 3).map((t) => (
-                        <span className="tag" key={t}>
-                          {t}
+                      {it.tags.slice(0, 3).map((tag) => (
+                        <span className="tag" key={tag}>
+                          {tag}
                         </span>
                       ))}
                     </div>
@@ -393,9 +406,9 @@ export default function BrowseView({
                           e.stopPropagation();
                           setDetail(it);
                         }}
-                        title="看描述与截图"
+                        title={t('browse.viewDetailsTip')}
                       >
-                        详情
+                        {t('browse.details')}
                       </button>
                       <button
                         className="btn sm primary"
@@ -403,10 +416,10 @@ export default function BrowseView({
                           e.stopPropagation();
                           void openInSteam(it);
                         }}
-                        title="在 Steam 客户端里打开这个条目 —— 直接在客户端里点「订阅」"
+                        title={t('browse.openInSteamTip')}
                       >
                         <IconExternal size={13} />
-                        在 Steam 里打开
+                        {t('browse.openInSteam')}
                       </button>
                       <button
                         className="btn sm"
@@ -414,9 +427,9 @@ export default function BrowseView({
                           e.stopPropagation();
                           void openWeb(it);
                         }}
-                        title="用浏览器打开网页版的工坊页面"
+                        title={t('browse.openWebTip')}
                       >
-                        网页版
+                        {t('browse.openWeb')}
                       </button>
                     </div>
                   </div>
@@ -428,29 +441,29 @@ export default function BrowseView({
           {result && result.total > PER_PAGE && (
             <div className="browse-pager">
               <button className="btn" disabled={page <= 1 || loading} onClick={() => goPage(page - 1)}>
-                上一页
+                {t('browse.prevPage')}
               </button>
-              <span>
-                第 {page} 页 / 共 {totalPages} 页
-              </span>
+              <span>{t('browse.pageLine', { page, pages: totalPages })}</span>
               <button
                 className="btn"
                 disabled={page >= totalPages || loading}
                 onClick={() => goPage(page + 1)}
               >
-                下一页
+                {t('browse.nextPage')}
               </button>
             </div>
           )}
 
           <div className="browse-note">
-            点卡片看<b>描述与截图</b>；订阅走 Steam 自己：点「<b>在 Steam 里打开</b>」→
-            在 Steam 客户端里点「订阅」（按钮换成「网页版」就用浏览器打开，效果一样）→
-            下载完成后回到本管理器，点顶栏的「同步到游戏」把新装的 mod 同步进游戏
-            （本页刻意不做下载，免得引入 SteamCMD 依赖）。
+            {t('browse.note1')}
+            <b>{t('browse.descriptionAndScreenshots')}</b>
+            {t('browse.note2')}
+            <b>{t('browse.openInSteam')}</b>
+            {t('browse.note3')}
             <br />
-            本页的数据都来自 Steam 官方接口/页面，所以<b>必须能访问 Steam</b>
-            —— 国内一般要先开加速器/代理，否则会一直「连不上 Steam」。
+            {t('browse.note4')}
+            <b>{t('browse.mustReachSteam')}</b>
+            {t('browse.note5')}
           </div>
         </>
       )}

@@ -97,6 +97,18 @@ node scripts/compare-mod-dirs.cjs "<A>" "<B>"    # 诊断：两个 mod 目录是
    - 工坊版：**只传那个 exe**。
 5. 老客户端下次启动会自动更新（`updater.js` + `electron-updater`）。
 
+**发布约定：把工坊版安装包也放进「最新那个 Release」。**
+GitHub 的 Release 列表里最新的一直在最上面，用户找起来方便，所以每条 Release 都同时放
+两个变体的安装包（文件名带 `workshop` 的就是工坊版）。**但 `latest.yml` 永远只有完整版那一份**，
+见下面的警告。
+
+**两条线可以不同步。** 主版本升了而工坊版**没有功能变化**时，工坊版可以继续停在旧版本号：
+- `workshop/bmm-app.json` 与 `workshop/filelist.xml` 是**构建输入**，跟着 `package.json` 走（下次打包就是新版本）
+- `workshop/publication.json` 的 `version` / `executable` / `executable_sha256` 是**已发布记录**，
+  写的是线上真实那一份（可以与 `package.json` 不同 —— 组装脚本故意不再拿它比对）
+- 这种状态下跑 `make-item-folder.cjs` 会提示"先跑 `pnpm run pack:workshop`"，
+  这是**刻意的**：防止把"内容是旧版、元数据是新版"的包传上去
+
 > ⚠️ **工坊版绝对不能传 `latest.yml`。**
 > 两个构建各自生成的 `latest.yml` **同名**，而一个 Release 只能有一个。
 > 工坊版没有自更新（主进程不注册 updater 的 IPC），那份文件对它毫无用处；
@@ -124,22 +136,28 @@ Git for Windows 要 fork `sh` 建命名管道）。流程一直是：我提交 �
 
 ### 1.6 界面多语言（i18n）
 
-**只有创意工坊版开放语言切换**（`features.languageSwitch`）。完整版锁死中文 ——
-因为主进程提示语还没走错误码、且 Browse 页未翻，放开会让用户看到中英混排。
+**两个变体都开放语言切换**（`features.languageSwitch` 恒为 `true`）。
+
+> 0.4.2 及之前只有创意工坊版能切、完整版锁死中文 —— 因为完整版独有的
+> `BrowseView` / `BrowseDetailModal`（浏览工坊那两个界面）当时还没翻，
+> 放开会让用户看到中英混排。0.4.3 补齐后就没有区别了。
 
 | 位置 | 作用 |
 | --- | --- |
-| `src/i18n.ts` | 核心 API（`t` / `TKey` / `getLang` / `setLang` / `detectLang` / `loadSavedLang` / `persistLang` / `localeTag`），以及**基础文案表**（外壳 / Mod 库 / 卡片 / 更新横幅 / toast） |
+| `src/i18n.ts` | 核心 API（`t` / `TKey` / `getLang` / `setLang` / `detectLang` / `loadSavedLang` / `persistLang` / `localeTag`），以及**基础文案表**（外壳 / Mod 库 / 卡片 / 更新横幅 / toast），并把下面各片段合并成总目录 |
 | `src/i18n/settings.ts` | 设置页文案（`settings.` 前缀） |
 | `src/i18n/modals.ts` | 四个弹窗（`modal.` 前缀） |
 | `src/i18n/collections.ts` | 合集页（`collections.` 前缀） |
 | `src/i18n/saves.ts` | 存档页（`saves.` 前缀） |
+| `src/i18n/browse.ts` | **浏览工坊**页（`browse.` 前缀，只有完整版会渲染） |
+| `src/i18n/browseDetail.ts` | **工坊条目详情**弹窗（`browseDetail.` 前缀，只有完整版会渲染） |
 | `src/i18n/categories.ts` | 内置分类标签的**显示名**映射 |
 | `src/i18n/mainMessages.ts` | 主进程中文提示 → 英文（**过渡方案**，见下） |
 
 **加一条文案的做法**：在对应片段里给 `xxxZh` 加 key + 中文，再给 `xxxEn` 加同样的 key + 英文。
 **两边 key 不一致会 tsc 报错**，这是刻意设计的保护网。key 用所属画面的前缀，
 且**不要在两个片段里定义同名 key**（合并时后者静默覆盖前者）。
+新画面建议**单开一个片段文件**（像 `browse.ts` 那样），这样多人/多 agent 并行翻译时不会互相覆盖。
 
 **三条容易踩的规则**：
 

@@ -86,9 +86,7 @@ export const modalsZh = {
   'modal.deleteLocalTip': '删除这个本地 mod，连它的历史快照一起',
   'modal.cancelDelete': '取消删除',
   'modal.deleteLocal': '删除本地 mod',
-  /* 列表分隔符统一用 `common.listSeparator`（以前这里各存一份，三处重复） */
-  /** 订阅数等大数字：中文用「万」，英文用 k（调用处同时传 n 与 k） */
-  'modal.countWan': '{n} 万',
+  /* 列表分隔符统一用 `common.listSeparator`；大数字统一用 `common.countWan`（都收敛到基础表） */
 
   // ------------------------------ Mod 详情：创意工坊条目 ------------------------------
   'modal.wsDescription': '创意工坊描述',
@@ -368,8 +366,7 @@ export const modalsEn: Record<keyof typeof modalsZh, string> = {
   'modal.deleteLocalTip': 'Delete this local mod together with its version history',
   'modal.cancelDelete': 'Cancel delete',
   'modal.deleteLocal': 'Delete local mod',
-  /** Big numbers such as subscription counts: Chinese uses 万, English uses k */
-  'modal.countWan': '{k}k',
+  /* Big numbers and list separators both live in the shared base table now. */
 
   // ------------------------------ Mod details: Workshop item ------------------------------
   'modal.wsDescription': 'Workshop description',

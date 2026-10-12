@@ -12,7 +12,7 @@ import { features } from '../features';
 import { getLang, t } from '../i18n';
 import { categoryLabel } from '../i18n/categories';
 import { translateMainMessage } from '../i18n/mainMessages';
-import { compareBadge, fmtDate, initials, modKey, uniq } from '../ui';
+import { compareBadge, fmtCount, fmtDate, initials, modKey, uniq } from '../ui';
 import { humanSize } from './BackupModal';
 import { WorkshopText } from '../workshopText';
 import {
@@ -37,15 +37,7 @@ function fmtDateTime(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 订阅数之类的大数字，超过一万用「万」显示（英文界面按千位显示 k） */
-function fmtCount(n: number): string {
-  if (!n) return '0';
-  if (n >= 10000) {
-    return t('modal.countWan', { n: (n / 10000).toFixed(1), k: (n / 1000).toFixed(1) });
-  }
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
+/** 订阅数之类的大数字统一用 `ui.fmtCount()`（三处重复已收敛） */
 
 export default function ModDetailModal({
   mod,

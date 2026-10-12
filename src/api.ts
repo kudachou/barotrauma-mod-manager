@@ -686,10 +686,14 @@ const mockApi = {
 
   // 预览模式：假装翻译了一下（真实翻译走 MyMemory 免费接口）
   translateText: async (
-    text: string
+    text: string,
+    lang?: string
   ): Promise<{ ok: boolean; text: string; chunks: number; cached?: boolean; error?: string }> => ({
     ok: true,
-    text: `【预览模式的示例翻译】${String(text || '').slice(0, 120)}`,
+    text:
+      lang === 'en'
+        ? `[preview sample translation] ${String(text || '').slice(0, 120)}`
+        : `【预览模式的示例翻译】${String(text || '').slice(0, 120)}`,
     chunks: 1
   }),
 

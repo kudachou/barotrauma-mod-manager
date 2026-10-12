@@ -12,7 +12,7 @@
   "program_languages": ["zh", "en"],
   "tags": ["QOL", "Client-side"],
   "executable": "barotrauma-mod-manager-workshop-setup-0.4.2.exe",
-  "executable_sha256": "bb25363f863053624731c4f758f08e6f764b50b2b900d93d6bc0a7605e65154b",
+  "executable_sha256": "438bbd482b92d0e138bcd480770974011cf03012d1e34788e6c2720d221575a2",
   "cover": {
     "zh": "cover/cover.zh.png",
     "en": "cover/cover.en.png",
@@ -28,6 +28,10 @@
     "  3817941004 是废弃的重复条目，应当删掉。",
     "previous_ids：曾经用过、现已废弃的条目 id。脚本据此认得出\"这是我们自己的旧 id\"，",
     "  从而允许把游戏目录里的 filelist.xml 从旧 id 改成新 id；同时不影响护栏拦住真正属于别人的条目。",
-    "executable_sha256 每次换包都要更新：Get-FileHash <exe> -Algorithm SHA256"
+    "executable / executable_sha256 记录的是**当前已发布**的那份（工坊版 0.4.2）",
+    "  ★ 工坊版**暂不随主版本更新**：Steam 条目与 release-ws 里的包都还是 0.4.2，功能上没变化。",
+    "    version 字段跟着 package.json（0.4.3）—— 它表示\"下次打工坊包会是哪个版本\"；",
+    "    真要更新工坊版时：pnpm run pack:workshop → 重新上传 → 更新这里的 executable/sha256。",
+    "  （条目内那个 0.4.2 包不含后来新增的 tags/export 截图；截图可直接在工坊页面改，不必重传）"
   ]
 }
