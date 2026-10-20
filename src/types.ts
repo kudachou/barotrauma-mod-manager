@@ -17,7 +17,12 @@ export interface ModInfo {
   /** 本地 = 文件夹名；工坊 = workshop id */
   id: string;
   folder: string;
+  /** 界面上显示的名字：用户起过自定义名就是它，否则等于 realName */
   name: string;
+  /** mod 自己的名字（filelist.xml 里那个）。存档匹配、关键词分类按它算，不能被自定义名覆盖 */
+  realName?: string;
+  /** name 是用户自定义的 */
+  nameCustom?: boolean;
   modVersion: string | null;
   gameVersion: string | null;
   steamworkshopid: string | null;
@@ -31,6 +36,8 @@ export interface ModInfo {
   autoCategories: string[];
   /** 封面图绝对路径（缓存图或本地指定图） */
   preview: string | null;
+  /** 这张封面是用户手动设的（userData/covers 里有文件），不是自动找的那张 */
+  coverManual?: boolean;
   /** 文件夹最后修改时间（ms） */
   mtime: number | null;
   /** 该 mod 被哪些合集启用（合集名数组） */

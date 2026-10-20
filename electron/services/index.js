@@ -44,6 +44,7 @@ const {
   setRelations,
   removeRelations
 } = require('./relations');
+const { getNames, setCustomName, removeCustomName } = require('./names');
 const {
   readWorkshopAcf,
   installTimeOf,
@@ -132,6 +133,20 @@ function safeKey(key) {
 
 function coverDir() {
   return path.join(userDataDir(), 'covers');
+}
+
+/**
+ * 给系统文件对话框用的默认目录：存在、而且确实是个目录才返回，否则返回 undefined
+ * （让 Electron 自己决定，别把一个不存在的路径塞进去 —— 那样对话框会退到别处甚至报错）。
+ */
+function dirIfExists(p) {
+  const s = String(p || '').trim();
+  if (!s) return undefined;
+  try {
+    return fs.statSync(s).isDirectory() ? s : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function findCover(key) {
@@ -242,6 +257,8 @@ function scanAll() {
 
   // 下架状态读缓存（不联网）；联网刷新是单独的 IPC，由界面按需触发
   const checks = readChecks(userDataDir());
+  /** 用户自定义的显示名（names.json），key 和 categories/relations 一致 */
+  const customNames = getNames(userDataDir());
 
   const mods = [...workshop, ...installedOnly, ...local];
   // 哪些工坊 mod 已经有一份对应的本地副本（= 已经备份过了）
@@ -253,10 +270,28 @@ function scanAll() {
   for (const m of mods) {
     const key = `${m.source}:${m.id}`;
     m.categories = Array.isArray(cats.mods[key]) ? [...cats.mods[key]] : [];
+    /*
+     * 自定义显示名：`name` 是**界面显示用**的（有自定义名就用它），
+     * 真名留在 `realName` —— 存档匹配（存档里记的是 contentpackage 名）、
+     * 关键词自动分类都还得按真名来，否则改个名字就丢标签、存档也对不上合集。
+     */
+    m.realName = m.name;
+    const custom = customNames[key];
+    m.name = custom || m.realName;
+    m.nameCustom = !!custom;
     // 被删掉的标签不能继续出现在关键词自动分类里
-    m.autoCategories = autoCategorize(m.name).filter((c) => !removed.includes(c));
+    m.autoCategories = autoCategorize(m.realName).filter((c) => !removed.includes(c));
+    /*
+     * 封面：**手动设的优先**，其次才是工坊缓存下来的预览图。
+     *
+     * 以前工坊 mod 这一行只查 cachedPreview，于是「给工坊 mod 设了封面，一刷新就没了」
+     * （用户评论里反馈的"链接完刷新就消失了"就是这个）。本地 mod 走的是 findCover，
+     * 所以只有工坊 mod 会中招 —— 而大家装的绝大多数是工坊 mod。
+     */
+    const pickedCover = findCover(key);
+    m.coverManual = !!pickedCover;
     m.preview =
-      m.source === 'workshop' ? cachedPreview(m.id, previewDir) : findCover(key);
+      pickedCover || (m.source === 'workshop' ? cachedPreview(m.id, previewDir) : null);
     m.usedIn = usedIn.get(key) || [];
     // 工坊 mod：条目本身还在不在；本地 mod：它对应的工坊来源还在不在
     const entry = m.source === 'workshop' ? checks[m.id] : checks[m.steamworkshopid];
@@ -658,13 +693,22 @@ function registerIpc() {
     return setApiKey(userDataDir(), key);
   });
 
-  ipcMain.handle('cover:set', async (_e, sourceId, imagePath) => {    const key = String(sourceId || '');
+  /**
+   * 设置本地封面。
+   * @param sourceId mod 的 key（workshop:123 / local:文件夹名）
+   * @param imagePath 直接给图片路径（调用方已经选好了）；不给就弹系统对话框
+   * @param modDir mod 自己的文件夹。对话框默认停在这里 —— 以前没给 defaultPath，
+   *   系统会落在「文档」里，用户得自己翻回 mod 文件夹（用户反馈过）。
+   */
+  ipcMain.handle('cover:set', async (_e, sourceId, imagePath, modDir) => {
+    const key = String(sourceId || '');
     if (!key) return null;
 
     let src = imagePath ? String(imagePath) : null;
     if (!src) {
       const r = await dialog.showOpenDialog({
         title: mt('选择封面图片', 'Choose a cover image'),
+        defaultPath: dirIfExists(modDir),
         properties: ['openFile'],
         filters: [
           { name: mt('图片', 'Images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }
@@ -688,6 +732,33 @@ function registerIpc() {
     return dest;
   });
 
+  /**
+   * 恢复默认封面：删掉手动设的那张图。
+   *
+   * 返回两样东西给界面用：
+   *   removed —— 到底删掉了没有（没设过就是 false，按钮本来也不该显示）
+   *   preview —— 删掉之后应该显示哪张。工坊 mod 有官方预览缓存就用它，
+   *              本地 mod 没有"官方图"这回事，回落到 null（界面显示占位色块）。
+   * 界面拿到 preview 直接换上，不用再自己猜或等下一次扫描。
+   */
+  ipcMain.handle('cover:clear', (_e, sourceId) => {
+    const key = String(sourceId || '');
+    if (!key) return { removed: false, preview: null };
+
+    let removed = false;
+    for (const ext of COVER_EXTS) {
+      const old = path.join(coverDir(), safeKey(key) + ext);
+      if (fs.existsSync(old)) {
+        fs.unlinkSync(old);
+        removed = true;
+      }
+    }
+
+    const wsId = key.startsWith('workshop:') ? key.slice('workshop:'.length) : '';
+    const preview = wsId ? cachedPreview(wsId, path.join(userDataDir(), 'previews')) : null;
+    return { removed, preview };
+  });
+
   /* -------------------------------- 分类 -------------------------------- */
 
   ipcMain.handle('categories:get', () => getCategories());
@@ -699,6 +770,12 @@ function registerIpc() {
   /* ------------------------------ 关联 mod ------------------------------ */
 
   ipcMain.handle('relations:set', (_e, key, keys) => setRelations(userDataDir(), key, keys));
+
+  /* --------------------------- 自定义显示名 --------------------------- */
+
+  // 只影响界面上显示的名字；文件、文件夹、合集条目一个字节都不动
+  ipcMain.handle('mod:setName', (_e, key, name) => setCustomName(userDataDir(), key, name));
+  ipcMain.handle('mod:clearName', (_e, key) => removeCustomName(userDataDir(), key));
 
   /* ---------------------------- 版本对比动作 ---------------------------- */
 

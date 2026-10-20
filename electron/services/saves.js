@@ -193,7 +193,8 @@ function listSavesInDir(dir, source) {
 function buildNameIndex(mods) {
   const byName = new Map();
   for (const m of mods || []) {
-    const k = normName(m.name);
+    // 存档里记的是 contentpackage 名，所以这里必须比真名 —— 用户自定义的显示名不算
+    const k = normName(m.realName || m.name);
     if (!k) continue;
     const cur = byName.get(k);
     if (!cur || (cur.source !== 'workshop' && m.source === 'workshop')) byName.set(k, m);
@@ -237,10 +238,10 @@ function modlistNameSets(dir, mods) {
       let real = null;
       if (e.type === 'workshop') {
         const m = byId.get(String(e.id));
-        real = m ? m.name : e.name;
+        real = m ? m.realName || m.name : e.name;
       } else {
         const m = byFolder.get(String(e.name));
-        real = m ? m.name : e.name;
+        real = m ? m.realName || m.name : e.name;
       }
       const key = normName(real);
       if (!key) continue;

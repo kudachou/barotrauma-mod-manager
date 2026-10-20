@@ -24,10 +24,12 @@ import {
   IconExternal,
   IconFolder,
   IconImage,
+  IconPencil,
   IconPlus,
   IconRefresh,
   IconSearch,
-  IconTrash
+  IconTrash,
+  IconUndo
 } from './Icons';
 
 function fmtDateTime(ms: number): string {
@@ -101,6 +103,9 @@ export default function ModDetailModal({
   const [wsError, setWsError] = useState<string | null>(null);
   const [relationQ, setRelationQ] = useState('');
   const [showRelationPicker, setShowRelationPicker] = useState(false);
+  /** 改显示名：editingName 时标题位置换成输入框 */
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
   const [pendingList, setPendingList] = useState<{ fileName: string; name: string } | null>(
     null
   );
@@ -255,14 +260,69 @@ export default function ModDetailModal({
 
   async function pickCover() {
     try {
-      const p = await api.setLocalCover(key);
+      // 对话框默认停在 mod 自己的文件夹里（和「打开文件夹」那个按钮用的是同一个算法）。
+      // 不传的话 Windows 会落在上次用过的位置，多半是「文档」，用户得自己翻回去。
+      const modDir = (mod.path || '').replace(/[\\/]filelist\.xml$/i, '');
+      const p = await api.setLocalCover(key, undefined, modDir);
       if (p) {
         setPreview(p);
-        onModUpdate({ ...mod, preview: p });
+        // coverManual 要一起带上：界面靠它决定显示不显示「恢复默认封面」，
+        // 不更新的话得等下一次扫描那个按钮才会冒出来
+        onModUpdate({ ...mod, preview: p, coverManual: true });
         onToast('ok', t('modal.coverUpdated'));
       }
     } catch (e: any) {
       onToast('err', t('modal.setCoverFailed'), String(e?.message || e));
+    }
+  }
+
+  /**
+   * 恢复默认封面：删掉手动设的那张。
+   * 工坊 mod 会回到官方预览图（后端把该显示哪张一起返回了），本地 mod 回到占位色块。
+   */
+  async function resetCover() {
+    try {
+      const r = await api.clearLocalCover(key);
+      const next = (r && r.preview) || null;
+      setPreview(next);
+      setThumbBroken(false);
+      onModUpdate({ ...mod, preview: next, coverManual: false });
+      onToast('ok', t('modal.coverReset'));
+    } catch (e: any) {
+      onToast('err', t('modal.coverResetFailed'), String(e?.message || e));
+    }
+  }
+
+  /**
+   * 保存自定义显示名。
+   * 只写 names.json（`key → 名字`），mod 文件夹、filelist.xml、合集条目一个字节都不动。
+   */
+  async function saveName() {
+    const next = nameDraft.trim();
+    if (!next || next === mod.name) return;
+    try {
+      await api.setModName(key, next);
+      onModUpdate({ ...mod, name: next, nameCustom: true, realName: mod.realName || mod.name });
+      setEditingName(false);
+      onToast('ok', t('modal.nameUpdated'));
+      // 列表页、合集页显示的名字都来自扫描结果，刷一次让它们跟着变
+      void onRefresh();
+    } catch (e: any) {
+      onToast('err', t('modal.nameUpdateFailed'), String(e?.message || e));
+    }
+  }
+
+  /** 恢复默认名字：删掉 names.json 里那一条，回到 filelist.xml 里的真名 */
+  async function resetName() {
+    try {
+      await api.clearModName(key);
+      const real = mod.realName || mod.name;
+      onModUpdate({ ...mod, name: real, nameCustom: false });
+      setEditingName(false);
+      onToast('ok', t('modal.nameReset'));
+      void onRefresh();
+    } catch (e: any) {
+      onToast('err', t('modal.nameResetFailed'), String(e?.message || e));
     }
   }
 
@@ -388,7 +448,75 @@ export default function ModDetailModal({
             )}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="modal-title">{mod.name}</div>
+            {editingName ? (
+              /* 改名：只改界面上显示的名字，文件/文件夹/合集条目都不动 */
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <input
+                  className="input"
+                  style={{ height: 30, maxWidth: 320, fontWeight: 600 }}
+                  value={nameDraft}
+                  autoFocus
+                  maxLength={80}
+                  placeholder={mod.realName || mod.name}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void saveName();
+                    if (e.key === 'Escape') setEditingName(false);
+                  }}
+                />
+                <button
+                  className="btn icon sm"
+                  title={t('common.save')}
+                  onClick={() => void saveName()}
+                  disabled={!nameDraft.trim() || nameDraft.trim() === mod.name}
+                >
+                  <IconCheck size={14} />
+                </button>
+                <button
+                  className="btn icon sm"
+                  title={t('common.cancel')}
+                  onClick={() => setEditingName(false)}
+                >
+                  <IconClose size={14} />
+                </button>
+                {mod.nameCustom && (
+                  <button
+                    className="btn sm"
+                    title={t('modal.resetNameTip')}
+                    onClick={() => void resetName()}
+                  >
+                    <IconUndo size={14} />
+                    {t('modal.resetName')}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <div className="modal-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {mod.name}
+                </div>
+                <button
+                  className="btn icon sm"
+                  title={t('modal.renameTip')}
+                  onClick={() => {
+                    setNameDraft(mod.name);
+                    setEditingName(true);
+                  }}
+                >
+                  <IconPencil size={14} />
+                </button>
+                {mod.nameCustom && (
+                  <button
+                    className="btn sm"
+                    title={t('modal.resetNameTip')}
+                    onClick={() => void resetName()}
+                  >
+                    <IconUndo size={14} />
+                    {t('modal.resetName')}
+                  </button>
+                )}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               <span className={`badge ${mod.source === 'local' ? 'src-local' : 'src-workshop'}`}>
                 {mod.source === 'local'
@@ -397,6 +525,12 @@ export default function ModDetailModal({
               </span>
               <span className="badge ver">v{mod.modVersion || '?'}</span>
               {badge && <span className={`badge ${badge.cls}`}>{t(badge.key)}</span>}
+              {/* 改过名之后把原名标出来，免得以后认不出这是哪个 mod */}
+              {mod.nameCustom && mod.realName && (
+                <span className="badge st-none" title={t('modal.renameTip')}>
+                  {t('modal.realName', { name: mod.realName })}
+                </span>
+              )}
             </div>
           </div>
           <button className="btn icon" onClick={onClose} title={t('common.close')}>
@@ -990,6 +1124,16 @@ export default function ModDetailModal({
             <IconImage size={14} />
             {t('modal.setCover')}
           </button>
+          {mod.coverManual && (
+            <button
+              className="btn sm"
+              onClick={() => void resetCover()}
+              title={t('modal.resetCoverTip')}
+            >
+              <IconUndo size={14} />
+              {t('modal.resetCover')}
+            </button>
+          )}
           <button className="btn sm" onClick={() => api.openModFolder(mod.path.replace(/[\\/]filelist\.xml$/i, ''))}>
             <IconFolder size={14} />
             {t('modal.openFolder')}

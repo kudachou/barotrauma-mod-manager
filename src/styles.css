@@ -1202,6 +1202,65 @@ select.input option {
   align-items: center;
 }
 
+/* 行里的分类标签：和 Mod 库卡片的 .card-tags 一个观感，只是排在名字下面第三行 */
+.row-tags {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 4px;
+}
+
+/*
+ * 只有合集编辑器里的行能拖，所以整行给 grab 手势（"游戏当前应用"是只读的，
+ * 那里在行上写了 inline cursor:default，不会被这条盖掉）。
+ */
+.mod-rows.editable .mod-row {
+  cursor: grab;
+}
+
+/* 拖拽进行中：整行文字不要被选中一片，光标保持"抓着"的状态 */
+.mod-rows.editable.drag-lock,
+.mod-rows.editable.drag-lock .mod-row {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/*
+ * 缩略图是 <img>，浏览器默认允许拖动图片 —— 那会打断自己写的指针拖拽，
+ * 拖动时看到的是"拖了一张图"的幽灵图。这里禁掉。
+ */
+.mod-row img,
+.mod-row .cover-ph {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* 拖拽时跟着指针的小标签（替代原生拖拽的那张半透明幽灵图） */
+.drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  /* 别挡住命中测试：落点是按指针坐标自己算的，这个标签只负责好看 */
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
 .picker {
   border-left: 1px solid var(--border);
   display: flex;

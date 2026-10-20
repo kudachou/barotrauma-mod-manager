@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { AppliedInfo, ModInfo, ModlistEntry, ModlistFull, ModlistSummary } from '../types';
 import { api, imgSrc, placeholderHue } from '../api';
 import { compareBadge, initials, safeFileName, uniq } from '../ui';
@@ -18,6 +19,7 @@ import {
   IconSave,
   IconSearch,
   IconTrash,
+  IconUndo,
   IconViewCard,
   IconViewList
 } from './Icons';
@@ -106,14 +108,36 @@ export default function CollectionsView({
   // 有未保存改动时不覆盖编辑器内容
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  /** 编辑器里这份内容是从哪个文件读出来的：「同一个合集被刷新」要留住改动，「切到别的合集」要还原 */
+  const loadedFileRef = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
+    const switched = loadedFileRef.current !== selectedFile;
+
+    /*
+     * 切换合集时，如果当前这份还有没保存的改动，直接还原再切走。
+     *
+     * 以前的做法是「有改动就不加载新的」，结果左边选中已经跳过去了、右边还停在旧合集上，
+     * 看着像点了没反应，而且那个状态没有出口。留着一个假的当前选中比丢掉改动更糟，
+     * 所以按用户的要求：切走就把这份没保存的改动还原掉，并明确提示一句。
+     */
+    if (switched && dirtyRef.current) {
+      dirtyRef.current = false;
+      onToast('info', t('collections.discardTitle'), t('collections.discardBody'));
+    }
+
     if (!selectedFile || selectedFile === APPLIED) {
+      loadedFileRef.current = selectedFile;
       setCurrent(null);
+      setDirty(false);
       return;
     }
-    if (dirtyRef.current) return;
+
+    // 同一个合集因为刷新（重新扫描 / 保存后）又跑到这里：有改动就留着，别覆盖
+    if (!switched && dirtyRef.current) return;
+
+    loadedFileRef.current = selectedFile;
     api
       .getModlist(selectedFile)
       .then((l: ModlistFull | null) => {
@@ -125,7 +149,22 @@ export default function CollectionsView({
     return () => {
       alive = false;
     };
+    // onToast / t 都是稳定的用法，不该进依赖：进来会让「刚切过去」被反复触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFile, reloadToken]);
+
+  /** 还原：丢掉没保存的改动，重新读一遍磁盘上那份 */
+  async function revertCurrent() {
+    if (!selectedFile || selectedFile === APPLIED) return;
+    try {
+      const l = await api.getModlist(selectedFile);
+      setCurrent(l ? { ...l, entries: [...l.entries] } : null);
+      setDirty(false);
+      onToast('ok', t('collections.revertedTitle'), t('collections.revertedBody'));
+    } catch (e: any) {
+      onToast('err', t('collections.revertFailed'), String(e?.message || e));
+    }
+  }
 
   const byWorkshopId = useMemo(() => {
     const m = new Map<string, ModInfo>();
@@ -195,6 +234,188 @@ export default function CollectionsView({
       return copy;
     });
   }
+
+  /*
+   * ---------------------------- 拖拽排序 ----------------------------
+   *
+   * 这里刻意**不用** HTML5 那套 draggable / ondragstart / ondrop。
+   * 浏览器一旦进入原生拖拽会话，滚轮事件就不再送到页面了 —— 于是拖到列表下半截时
+   * 想看看更下面的 mod，只能先松手、滚一下、再重新拖一遍。用户反馈的就是这个。
+   *
+   * 换成 pointerdown / pointermove 自己算落点之后就没有原生拖拽会话：
+   * 滚动还是交给浏览器（滚轮滚 .mod-rows 就行），我们每帧按最新的滚动位置重算落点。
+   * 另外补了贴近上下边缘时的自动滚动，跨好几屏拖的时候也不用来回松手。
+   */
+  const dragListRef = useRef<HTMLDivElement | null>(null);
+  const dragInfo = useRef<{
+    idx: number;
+    over: number | null;
+    active: boolean;
+    x0: number;
+    y0: number;
+    x: number;
+    y: number;
+    pointerId: number;
+    /** 上一帧「滚动位置 + 指针 Y」，两个都没变就不用重新量行高 */
+    key: string;
+  } | null>(null);
+  const dragRaf = useRef<number | null>(null);
+  const dragDetach = useRef<(() => void) | null>(null);
+  /** 跟着指针走的那个"手里拿着什么"的小标签（原生拖拽本来有半透明幽灵图，自己实现就得补一个） */
+  const dragGhost = useRef<HTMLDivElement | null>(null);
+  /** 指针监听器是拖拽开始时注册的，闭包里的 entries 会一直是旧的 —— 走 ref 拿最新的那个 */
+  const dragMove = useRef(moveEntry);
+  dragMove.current = moveEntry;
+
+  /** 指针现在是第几条（落在行与行的间隙里时取纵向最近的一行） */
+  function rowIndexAt(y: number): number | null {
+    const list = dragListRef.current;
+    if (!list) return null;
+    let best: number | null = null;
+    let bestDist = Infinity;
+    for (const row of Array.from(list.querySelectorAll<HTMLElement>('.mod-row[data-idx]'))) {
+      const r = row.getBoundingClientRect();
+      if (y >= r.top && y <= r.bottom) return Number(row.dataset.idx);
+      const d = Math.abs(y - (r.top + r.bottom) / 2);
+      if (d < bestDist) {
+        bestDist = d;
+        best = Number(row.dataset.idx);
+      }
+    }
+    return best;
+  }
+
+  /** 重算高亮落点（只有真的换了行才 setState，免得拖动时整列表跟着重渲染） */
+  function syncDropTarget() {
+    const info = dragInfo.current;
+    if (!info) return;
+    const over = rowIndexAt(info.y);
+    if (over !== info.over) {
+      info.over = over;
+      setOverIdx(over);
+    }
+  }
+
+  /** 拖拽期间的逐帧任务：贴边自动滚动 + 滚动之后重算落点 */
+  function dragTick() {
+    const info = dragInfo.current;
+    const list = dragListRef.current;
+    if (!info || !info.active || !list) {
+      dragRaf.current = null;
+      return;
+    }
+    const r = list.getBoundingClientRect();
+    const EDGE = 48;
+    const MAX = 15;
+    let dy = 0;
+    if (info.y < r.top + EDGE) dy = -MAX * Math.min(1, (r.top + EDGE - info.y) / EDGE);
+    else if (info.y > r.bottom - EDGE) dy = MAX * Math.min(1, (info.y - r.bottom + EDGE) / EDGE);
+    if (dy !== 0) {
+      const before = list.scrollTop;
+      list.scrollTop = before + dy;
+      if (list.scrollTop !== before) info.key = '';
+    }
+    const key = `${Math.round(list.scrollTop)}:${Math.round(info.y)}`;
+    if (key !== info.key) {
+      info.key = key;
+      syncDropTarget();
+    }
+    // 幽灵标签跟着指针走：直接改 style，别走 state（每帧都 setState 会把整个列表重渲染一遍）
+    const ghost = dragGhost.current;
+    if (ghost) ghost.style.transform = `translate3d(${info.x + 14}px, ${info.y + 10}px, 0)`;
+    dragRaf.current = requestAnimationFrame(dragTick);
+  }
+
+  function endDrag(apply: boolean) {
+    const info = dragInfo.current;
+    if (dragRaf.current !== null) {
+      cancelAnimationFrame(dragRaf.current);
+      dragRaf.current = null;
+    }
+    dragDetach.current?.();
+    dragDetach.current = null;
+    dragInfo.current = null;
+    setDragIdx(null);
+    setOverIdx(null);
+    // 松手时浏览器自己会释放指针捕获，但「按 Esc 取消」的时候鼠标还按着 ——
+    // 不主动释放的话，捕获会一直挂在列表上，接下来点行里的按钮也会被吞掉
+    try {
+      dragListRef.current?.releasePointerCapture(info?.pointerId ?? -1);
+    } catch {
+      /* 本来就没捕获成功（合成事件）就算了 */
+    }
+    if (info && apply && info.active) {
+      // 落点按松手这一瞬间的几何位置现算：滚轮可能刚滚完、上一帧还没量
+      const to = rowIndexAt(info.y);
+      if (to !== null && to !== info.idx) dragMove.current(info.idx, to);
+    }
+  }
+
+  function beginDrag(i: number, ev: ReactPointerEvent<HTMLDivElement>) {
+    if (ev.button !== 0) return;
+    // 行里的按钮（订阅 / 删除）照常响应，别把点击吃掉
+    if ((ev.target as HTMLElement | null)?.closest('button')) return;
+    // 不拦默认行为的话，拖一下就把整行文字选中一片
+    ev.preventDefault();
+    try {
+      dragListRef.current?.setPointerCapture(ev.pointerId);
+    } catch {
+      /* 合成事件没有真实 pointerId，捕获失败也不影响下面的 window 监听 */
+    }
+    dragInfo.current = {
+      idx: i,
+      over: null,
+      active: false,
+      x0: ev.clientX,
+      y0: ev.clientY,
+      x: ev.clientX,
+      y: ev.clientY,
+      pointerId: ev.pointerId,
+      key: ''
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const info = dragInfo.current;
+      if (!info) return;
+      info.x = e.clientX;
+      info.y = e.clientY;
+      if (!info.active) {
+        // 移动超过 4px 才算拖拽，免得手抖把单击变成拖拽
+        if (Math.abs(e.clientX - info.x0) < 4 && Math.abs(e.clientY - info.y0) < 4) return;
+        info.active = true;
+        setDragIdx(info.idx);
+        dragRaf.current = requestAnimationFrame(dragTick);
+      }
+      info.key = '';
+    };
+    const onUp = () => endDrag(true);
+    const onCancel = () => endDrag(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') endDrag(false);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey);
+    dragDetach.current = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey);
+    };
+  }
+
+  // 拖到一半切走页面（组件卸载）时，别把监听器和 rAF 留在那儿
+  useEffect(
+    () => () => {
+      if (dragRaf.current !== null) cancelAnimationFrame(dragRaf.current);
+      dragRaf.current = null;
+      dragDetach.current?.();
+      dragDetach.current = null;
+      dragInfo.current = null;
+    },
+    []
+  );
 
   async function scrollToTop() {
     void 0;
@@ -558,6 +779,10 @@ export default function CollectionsView({
                     const hue = placeholderHue(r.entry.name || r.entry.id || '?');
                     const src = imgSrc(r.mod?.preview || null);
                     const cb = r.mod ? compareBadge(r.mod) : null;
+                    const tags = uniq([...(r.mod?.categories || []), ...(r.mod?.autoCategories || [])]).slice(
+                      0,
+                      3
+                    );
                     return (
                       <div key={r.key} className="mod-row" style={{ cursor: 'default' }}>
                         <div className="row-index">{i + 1}</div>
@@ -591,6 +816,20 @@ export default function CollectionsView({
                             {cb && <span className={`badge ${cb.cls}`}>{t(cb.key)}</span>}
                             {!r.mod && <span className="badge st-different">{t('collections.notFound')}</span>}
                           </div>
+                          {/* 列表模式也带分类标签，不用切到大卡片才看得见 */}
+                          {r.mod && (
+                            <div className="row-tags">
+                              {/* ⚠️ 循环变量不能叫 t —— 会遮蔽 i18n 的 t() */}
+                              {tags.map((tag) => (
+                                <span key={tag} className="tag" style={categoryStyle(tag)}>
+                                  {categoryLabel(tag, getLang())}
+                                </span>
+                              ))}
+                              {tags.length === 0 && (
+                                <span className="badge st-none">{t('common.uncategorized')}</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -636,6 +875,15 @@ export default function CollectionsView({
             >
               <IconTrash size={14} />
             </button>
+            <button
+              className="btn sm"
+              onClick={() => void revertCurrent()}
+              disabled={!dirty}
+              title={t('collections.revertTip')}
+            >
+              <IconUndo size={14} />
+              {t('collections.revertBtn')}
+            </button>
             <button className="btn sm" onClick={() => void saveCurrent()} disabled={!dirty}>
               <IconSave size={14} />
               {t('common.save')}
@@ -647,7 +895,14 @@ export default function CollectionsView({
           </div>
 
           <div className="editor-body">
-            <div className="mod-rows" onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}>
+            <div
+              ref={dragListRef}
+              className={`mod-rows editable ${dragIdx !== null ? 'drag-lock' : ''}`}
+              onWheel={() => {
+                // 滚轮是浏览器自己滚的：此刻 scrollTop 还是旧值，让下一帧重新量一次落点
+                if (dragInfo.current) dragInfo.current.key = '';
+              }}
+            >
               <div
                 style={{
                   fontSize: 11.5,
@@ -693,24 +948,16 @@ export default function CollectionsView({
                 const hue = placeholderHue(e.name || e.id || '?');
                 const src = imgSrc(m?.preview || null);
                 const cb = m ? compareBadge(m) : null;
+                // 分类标签：和 Mod 库/大卡片一致，一眼看出这条是什么类型的 mod
+                const tags = uniq([...(m?.categories || []), ...(m?.autoCategories || [])]).slice(0, 3);
                 return (
                   <div
                     key={`${e.type}-${e.id || e.name}-${i}`}
+                    data-idx={i}
                     className={`mod-row ${dragIdx === i ? 'dragging' : ''} ${
                       overIdx === i && dragIdx !== null && dragIdx !== i ? 'drop-target' : ''
                     }`}
-                    draggable
-                    onDragStart={() => setDragIdx(i)}
-                    onDragOver={(ev) => {
-                      ev.preventDefault();
-                      setOverIdx(i);
-                    }}
-                    onDrop={(ev) => {
-                      ev.preventDefault();
-                      if (dragIdx !== null) moveEntry(dragIdx, i);
-                      setDragIdx(null);
-                      setOverIdx(null);
-                    }}
+                    onPointerDown={(ev) => beginDrag(i, ev)}
                   >
                     <div className="drag-handle">
                       <IconGrip size={15} />
@@ -740,6 +987,20 @@ export default function CollectionsView({
                         {cb && <span className={`badge ${cb.cls}`}>{t(cb.key)}</span>}
                         {!m && <span className="badge st-different">{t('collections.notFound')}</span>}
                       </div>
+                      {/* 分类标签：整理合集时要一眼看出每条是什么类型 */}
+                      {m && (
+                        <div className="row-tags">
+                          {/* ⚠️ 循环变量不能叫 t —— 会遮蔽 i18n 的 t() */}
+                          {tags.map((tag) => (
+                            <span key={tag} className="tag" style={categoryStyle(tag)}>
+                              {categoryLabel(tag, getLang())}
+                            </span>
+                          ))}
+                          {tags.length === 0 && (
+                            <span className="badge st-none">{t('common.uncategorized')}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     {!m && e.type === 'workshop' && e.id && (
                       <button
@@ -807,6 +1068,26 @@ export default function CollectionsView({
             <div className="empty-title">{t('collections.selectTitle')}</div>
             <div>{t('collections.selectHint')}</div>
           </div>
+        </div>
+      )}
+
+      {/*
+        拖拽时跟着指针的小标签：原生 HTML5 拖拽自带一张半透明的幽灵图，
+        改成自己实现之后得补上，不然拖的过程中列表一滚，就不知道手里拿的是哪条了。
+      */}
+      {dragIdx !== null && entries[dragIdx] && (
+        <div
+          className="drag-ghost"
+          ref={(el) => {
+            dragGhost.current = el;
+            const info = dragInfo.current;
+            if (el && info) el.style.transform = `translate3d(${info.x + 14}px, ${info.y + 10}px, 0)`;
+          }}
+        >
+          <IconGrip size={12} />
+          {resolve(entries[dragIdx])?.name ||
+            entries[dragIdx].name ||
+            `#${entries[dragIdx].id}`}
         </div>
       )}
 

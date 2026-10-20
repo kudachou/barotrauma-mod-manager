@@ -15,8 +15,8 @@ app.commandLine.appendSwitch('disable-gpu');
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.disableHardwareAcceleration();
 
-const TMP = path.join(ROOT, 'tmp-collections-ui');
-fs.rmSync(TMP, { recursive: true, force: true });
+const { freshDir } = require('./_tmpdir.cjs');
+const TMP = freshDir(path.join(ROOT, 'tmp-collections-ui'));
 
 const USERDATA = path.join(TMP, 'userdata');
 const GAME = path.join(TMP, 'game');
@@ -434,6 +434,37 @@ app.whenReady().then(async () => {
   ok(rowsBack === 3, `切回列表后又是 3 行（实际 ${rowsBack}）`);
   const cardsGone = await js(`document.querySelectorAll('.mod-cards .mod-tile').length`);
   ok(cardsGone === 0, '卡片容器已移除');
+
+  /*
+   * 列表模式也必须有分类标签。
+   * 以前只有「大卡片」那套视图带标签，切成列表就成了光秃秃一行名字 ——
+   * 用户反馈「合集页看不到分类标签」正是这个差异造成的观感。
+   */
+  const listTags = await js(
+    `Array.from(document.querySelectorAll('.mod-rows .row-tags .tag')).map((x) => x.textContent.trim())`
+  );
+  console.log('  列表分类标签: ' + JSON.stringify(listTags));
+  ok(listTags.length >= 3, `列表模式下每行都有分类标签（实际 ${listTags.length} 个）`, listTags);
+  ok(
+    listTags.some((t) => t.includes('潜艇') || t.includes('舰')) &&
+      listTags.some((t) => t.includes('武器')) &&
+      listTags.some((t) => t.includes('生物')),
+    '三个 mod 的分类在列表模式下也标出来了',
+    listTags
+  );
+
+  const tagLineBox = await js(`(() => {
+    const row = document.querySelector('.mod-rows .mod-row');
+    const name = row.querySelector('.row-name').getBoundingClientRect();
+    const tags = row.querySelector('.row-tags').getBoundingClientRect();
+    const rb = row.getBoundingClientRect();
+    return { nameBottom: Math.round(name.bottom), tagsTop: Math.round(tags.top), tagsBottom: Math.round(tags.bottom), rowBottom: Math.round(rb.bottom) };
+  })()`);
+  ok(
+    tagLineBox.tagsTop >= tagLineBox.nameBottom - 1 && tagLineBox.tagsBottom <= tagLineBox.rowBottom + 1,
+    '列表里的标签行在名字下面、且没有溢出这一行',
+    tagLineBox
+  );
 
   /* --------------------------- 5. 记住选择（重挂载） --------------------------- */
   console.log('\n[5] 选择要记住：切到别的页面再回来');

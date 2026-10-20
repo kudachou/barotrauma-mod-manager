@@ -1,42 +1,64 @@
-[b]潜渊症 Mod 管理器[/b]——拖拽排序加载顺序、一键应用合集、合集导入导出、分类标签、本地与工坊版本对比、把 Steam 已下载的更新直接同步进游戏、备份与回滚。中英双语界面。
+[h1]潜渊症 Mod 管理器[/h1]
 
-源码：[url=https://github.com/kudachou/barotrauma-mod-manager]GitHub[/url] · [url=https://github.com/kudachou/barotrauma-mod-manager/releases]Releases[/url]
+管理本地 mod 和创意工坊 mod 的 Windows 桌面程序。它不是游戏内的 mod，是一个单独的程序。
 
-[h2]这是工具，不是 mod[/h2]
-独立桌面程序。[b]不要把它启用进 mod 列表，也不要挂到服务器上。[/b]
+平时进游戏前要一个个勾 mod、手动排顺序；过段时间回来，某个 mod 被作者删了、存档打不开；工坊悄悄更新了，本地还是旧的。这个工具把这些摊开给你看。
 
-[h2]安装[/h2]
+[h2]它能做什么[/h2]
+
 [list]
-[*]订阅并等 Steam 下载完
-[*]在 Steam 里右键「潜渊症」→ 管理 → 浏览本地文件（会打开 [code]steamapps\common\Barotrauma[/code]）→ 往上回到 [code]steamapps[/code] → 进 [code]workshop\content\602960\[/code] → 打开文件夹 [b]3817971486[/b]（就是本条目）
-[*]运行 [b]setup.cmd[/b]，或直接双击同目录下的安装包（文件名以 [code]workshop-setup-[/code] 结尾的那个 .exe）
+[*]合集：直接读写游戏自己的 ModLists\*.xml。拖拽排序，一键应用，写回 config_player.xml 之前自动备份。
+[*]导入导出：能导出成游戏原生 xml（别人不装这个程序也能直接用）、带名字和链接的 json、或者直接贴群里的一段文本。导入时会自动补上 mod 名字，并列出你还没订阅的，点一下打开工坊页面。
+[*]本地 mod 和工坊版本对比：看出哪个更新，一键用工坊版覆盖本地版，或者把它复制成一份新的本地 mod。覆盖前先留快照。
+[*]同步到游戏：Steam 已经下好的更新直接装进游戏，不让它整包重下。
+[*]存档：看每个存档当时启用了哪些 mod，以及哪个合集能把它还原出来。
+[*]备份：一键把工坊里的 mod 全存到本地；单个 mod 也能随时打快照、回滚。
+[*]分类标签：按关键词自动分类，也能自己建标签。一个 mod 可以挂多个，点标签就筛选。
+[*]封面、搜索、来源筛选、排序。
 [/list]
-没开过游戏也没关系，文件就在上面那个 Steam 目录里。（如果你已经启动过游戏，同一份文件也会被复制到 [code]%LOCALAPPDATA%\Daedalic Entertainment GmbH\Barotrauma\WorkshopMods\Installed\3817971486\[/code]，两个位置都能用。）
+
+[h2]怎么装[/h2]
+
+[list]
+[*]订阅这个条目，等 Steam 下载完。
+[*]在 Steam 里右键「潜渊症」→ 管理 → 浏览本地文件（打开的是 steamapps\common\Barotrauma），往上退一级到 steamapps，再进 workshop\content\602960\3817971486。
+[*]运行 setup.cmd，或者直接双击同目录里那个 setup.exe。
+[/list]
+
+装完桌面会有快捷方式。按用户安装，不弹 UAC。
+
+没开过游戏也没关系，文件就在上面那个 Steam 目录里。如果你已经启动过游戏，同一份文件也会被复制到 %LOCALAPPDATA%\Daedalic Entertainment GmbH\Barotrauma\WorkshopMods\Installed\3817971486，两个位置都能用。
 
 [h2]更新[/h2]
-装一次就不用再管安装包了。Steam 更新本条目后，[b]打开一次已安装的管理器[/b]即可：它会发现工坊里的新版，顶部提示「工坊已更新到 vX.X.X」——点一下[b]立即升级[/b]，程序自己完成升级并重开新版。不用去找安装包，也不用手动替换文件。
 
-[h2]能做什么[/h2]
-[list]
-[*][b]合集[/b]——直接用游戏自己的 [code]ModLists\*.xml[/code]；拖拽排序、一键应用（先备份 [code]config_player.xml[/code]）
-[*][b]合集导入导出[/b]——导出成游戏原生 [code]ModLists\*.xml[/code]（朋友不装管理器就能直接用）、信息最全的 JSON（含未订阅 mod 的名字与链接）、或能直接贴进聊天的纯文本；导入时自动补全标题，并列出本机还没有的 mod，点一下就能去工坊订阅
-[*][b]本地 ↔ 工坊[/b]——版本对比；用工坊版覆盖本地版（先留快照），或复制成新的本地 mod
-[*][b]同步到游戏[/b]——把 Steam 已经下好的更新装进游戏，不让 Steam 整包重下
-[*][b]存档[/b]——看清每个存档当时启用了哪些 mod，并找出能复现它的合集
-[*][b]备份[/b]——一键把所有工坊 mod 存到本地；每个本地 mod 保留历史快照、可回滚
-[*][b]分类标签[/b]——按关键词自动预分类（15 个内置类别），也能自己建标签；一个 mod 可以挂多个，点标签即筛选，每个标签有独立配色。删掉标签会从所有 mod 上摘除，重新输入同名标签即可恢复
-[*]封面、搜索、来源筛选、排序
-[/list]
+Steam 更新这个条目之后，打开一次已经装好的程序就行：它会发现新版，点一下自己完成升级并重开。不用去找安装包。
 
-[h2]权限说明[/h2]
-[b]读取[/b]：你指定的潜渊症目录、当前用户的 mod 与配置目录、Steam 的清单文件。[b]写入[/b]：只写你指定的游戏目录，以及 [code]%APPDATA%\潜渊症Mod管理器[/code]。联网只用 Steam 的公开工坊接口与页面——[b]本版不需要任何 API Key，也不含「浏览工坊」功能[/b]。
+[h2]它是工具，不是 mod[/h2]
 
-[b]不枚举进程、不写注册表、不读浏览器或凭据、没有遥测、不需要管理员权限。[/b]这些是本程序的代码约束，不是操作系统沙箱。完整清单见 [url=https://github.com/kudachou/barotrauma-mod-manager/blob/main/README.md#安全说明]README 的安全说明[/url]。
+装完不要把它启用进 mod 列表，也不要挂在服务器上。
+
+[h2]关于读写和联网[/h2]
+
+读取：你指定的游戏目录、当前用户的 mod 和配置目录、Steam 的清单文件。
+
+写入：只写你指定的游戏目录，以及 %APPDATA%\潜渊症Mod管理器。
+
+联网：只用 Steam 的公开工坊接口和页面。这个版本不需要 Steam Web API Key，也没有「浏览工坊」。
+
+不枚举进程、不写注册表、不读浏览器和凭据，没有遥测，不需要管理员权限。这些是本程序的代码约束，不是操作系统沙箱。
+
+[h2]其它[/h2]
+
+GitHub 上还有一个功能更多的版本，带「浏览工坊」（在程序里搜索 mod、看截图和描述）和工坊下架检查。这两个功能用的人少，我没法确认在别人机器上都正常，所以没放进这个条目。想试的话去 github.com/kudachou/barotrauma-mod-manager/releases，安装包文件名不带 workshop 的那个是完整版，需要你自己申请一个 Steam Web API Key。
+
+有问题写在评论里也行。
 
 [h2]反馈[/h2]
-评论或 [url=https://github.com/kudachou/barotrauma-mod-manager/issues]GitHub Issues[/url]。请附上版本号、你的操作步骤，以及完整报错文字。
 
-[h2]功能更多的版本在 GitHub[/h2]
-GitHub 上另有一个功能更多的版本（例如[b]浏览创意工坊[/b]：在管理器里直接搜索、按分类筛选、看截图画廊和中文描述）。但这些功能[b]目前无法确认是否正常运行[/b]——使用的人少、反馈也少，我没有足够的验证，所以[b]不在工坊版提供[/b]。想试的话见 [url=https://github.com/kudachou/barotrauma-mod-manager/releases]Releases[/url]：安装包文件名[b]不带[/b] [code]workshop[/code] 的那个就是。注意它需要你自己申请 Steam Web API Key，浏览器能打开创意工坊是前提。
+源码：[url=https://github.com/kudachou/barotrauma-mod-manager]github.com/kudachou/barotrauma-mod-manager[/url]
 
-[i]开发过程中使用了 AI 辅助。上面已列出这个工具会做的每件事；如发现与描述不符，请直接反馈。[/i]
+问题反馈：[url=https://github.com/kudachou/barotrauma-mod-manager/issues]GitHub Issues[/url]，或者直接写在评论里。
+
+附上版本号、你做了什么操作、完整的报错文字，会好查很多。
+
+开发过程中有 AI 辅助。

@@ -63,7 +63,14 @@ contextBridge.exposeInMainWorld('api', {
   setSteamApiKey: (key) => invoke('steam:setApiKey', key),
 
   // covers (local mod manual cover)
-  setLocalCover: (sourceId, imagePath) => invoke('cover:set', sourceId, imagePath),
+  // modDir：让「选择封面图片」对话框默认停在这个 mod 自己的文件夹里
+  setLocalCover: (sourceId, imagePath, modDir) => invoke('cover:set', sourceId, imagePath, modDir),
+  // 恢复默认封面：删掉手动设的那张，回到自动找到的那张
+  clearLocalCover: (sourceId) => invoke('cover:clear', sourceId),
+
+  // 自定义显示名（只改界面上显示的名字，不动文件夹 / 合集条目）
+  setModName: (sourceId, name) => invoke('mod:setName', sourceId, name),
+  clearModName: (sourceId) => invoke('mod:clearName', sourceId),
 
   // categories
   getCategories: () => invoke('categories:get'),

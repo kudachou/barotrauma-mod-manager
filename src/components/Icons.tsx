@@ -70,6 +70,25 @@ export const IconRefresh = (p: IconProps) => (
   </S>
 );
 
+/**
+ * 还原（丢掉改动，回到上次保存的样子）。
+ * 别和 IconRefresh 混用：那个是「重新扫描 / 刷新」，方向也相反。
+ */
+export const IconUndo = (p: IconProps) => (
+  <S {...p}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h9.5a6 6 0 0 1 0 12H8" />
+  </S>
+);
+
+/** 改名 / 编辑 */
+export const IconPencil = (p: IconProps) => (
+  <S {...p}>
+    <path d="M4 20h4l10.5-10.5a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5V20Z" />
+    <path d="m13.5 6.5 4 4" />
+  </S>
+);
+
 export const IconFolder = (p: IconProps) => (
   <S {...p}>
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />

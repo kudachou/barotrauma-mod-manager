@@ -23,9 +23,8 @@ function ok(cond, msg) {
   if (!cond) failures++;
 }
 
-const TMP = path.join(__dirname, '..', 'tmp-test');
-fs.rmSync(TMP, { recursive: true, force: true });
-fs.mkdirSync(TMP, { recursive: true });
+const { freshDir } = require('./_tmpdir.cjs');
+const TMP = freshDir(path.join(__dirname, '..', 'tmp-test'));
 
 /*
  * 主体放在 async 函数里：长任务（runWorkshopBackup / runInstallSync）现在是 async 的
@@ -554,6 +553,54 @@ try {
 
   rel.setRelations(relDir, 'workshop:111', []);
   ok(!rel.getRelations(relDir)['workshop:111'], '传空数组等于删掉这条关联');
+
+  /* ---------------------- 9b. 自定义显示名（names.json） ---------------------- */
+
+  console.log('\n[9b] 自定义显示名');
+
+  const names = require('../electron/services/names');
+  const nameDir = path.join(TMP, 'names');
+
+  ok(Object.keys(names.getNames(nameDir)).length === 0, '初始没有自定义名');
+  ok(!fs.existsSync(nameDir), '初始连文件都还没建');
+
+  names.setCustomName(nameDir, 'workshop:111', '  我的主力武器  ');
+  const n1 = names.getNames(nameDir);
+  ok(n1['workshop:111'] === '我的主力武器', '保存自定义名（首尾空白被去掉）', n1['workshop:111']);
+  ok(fs.existsSync(path.join(nameDir, 'names.json')), '写进了 names.json');
+  ok(names.getNames(nameDir)['workshop:111'] === '我的主力武器', '重新读取（走磁盘）结果一致');
+
+  names.setCustomName(nameDir, 'local:某mod', '改过的名字\n第二行');
+  ok(
+    names.getNames(nameDir)['local:某mod'] === '改过的名字 第二行',
+    '换行/控制字符被压成空格（名字不能把布局撑坏）',
+    names.getNames(nameDir)['local:某mod']
+  );
+
+  const longName = 'x'.repeat(200);
+  names.setCustomName(nameDir, 'workshop:222', longName);
+  ok(
+    names.getNames(nameDir)['workshop:222'].length === names.MAX_LEN,
+    `超长名字被截到 ${names.MAX_LEN} 个字符`,
+    names.getNames(nameDir)['workshop:222'].length
+  );
+
+  names.setCustomName(nameDir, 'workshop:111', '   ');
+  ok(!names.getNames(nameDir)['workshop:111'], '传空白名字等于恢复默认（不留空条目）');
+
+  names.setCustomName(nameDir, 'local:某mod', '另一个名字');
+  names.removeCustomName(nameDir, 'local:某mod');
+  const n2 = names.getNames(nameDir);
+  ok(!n2['local:某mod'], '恢复默认名字：这条被删掉');
+  ok(n2['workshop:222'] === longName.slice(0, names.MAX_LEN), '别的 mod 的自定义名没被误删');
+
+  let nameThrew = false;
+  try {
+    names.setCustomName(nameDir, '', '随便');
+  } catch {
+    nameThrew = true;
+  }
+  ok(nameThrew, '没有 mod 标识时直接报错，不写脏数据');
 
   // 从 config_player.xml 反推「当前生效的 mod」
   const { readAppliedPackages } = require('../electron/services/config');

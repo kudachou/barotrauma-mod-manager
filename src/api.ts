@@ -772,7 +772,12 @@ const mockApi = {
     };
   },
 
-  setLocalCover: async (sourceId: string): Promise<string | null> => {
+  // modDir 只给真实实现用（让文件对话框默认停在 mod 文件夹里），预览模式用浏览器自己的选择器
+  setLocalCover: async (
+    sourceId: string,
+    _imagePath?: string,
+    _modDir?: string
+  ): Promise<string | null> => {
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
@@ -785,6 +790,15 @@ const mockApi = {
       input.click();
     });
   },
+
+  // 恢复默认封面：预览模式没有真正的封面文件，直接说"没删到东西"
+  clearLocalCover: async (
+    _sourceId?: string
+  ): Promise<{ removed: boolean; preview: string | null }> => ({ removed: false, preview: null }),
+
+  // 自定义显示名：预览模式只改内存里那一份，刷新就没了（真实实现会写 names.json）
+  setModName: async (_sourceId?: string, _name?: string): Promise<void> => {},
+  clearModName: async (_sourceId?: string): Promise<void> => {},
 
   getCategories: async (): Promise<CategoryData> => state.categories,
   setModCategories: async (sourceId: string, tags: string[]): Promise<CategoryData> => {

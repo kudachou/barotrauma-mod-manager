@@ -66,11 +66,19 @@ pnpm exec electron scripts/test-browse-ui.cjs    # 浏览工坊：没 key / key 
 pnpm exec electron scripts/test-compare-ui.cjs   # 本地↔工坊互操作：覆盖/复制/删 mod（61），含越界删除防护
 pnpm exec electron scripts/test-csp.cjs          # CSP 不拦界面需要的资源（工坊图要走 CDN，12）
 pnpm exec electron scripts/test-i18n-ui.cjs      # 界面语言：工坊版可切/记得住，完整版锁死中文
-pnpm exec electron scripts/test-collections-ui.cjs # 合集页列表/卡片两种视图 + 不重叠（32）
+pnpm exec electron scripts/test-cover-ui.cjs         # 设置封面：对话框停在 mod 文件夹 + 刷新不丢 + 恢复默认（26）
+pnpm exec electron scripts/test-rename-ui.cjs        # 自定义显示名 + 恢复默认名字（31）
+pnpm exec electron scripts/test-collections-ui.cjs # 合集页列表/卡片两种视图 + 分类标签 + 不重叠（35）
+pnpm exec electron scripts/test-collections-drag-ui.cjs # 合集拖拽排序：拖拽中滚轮 / 贴边自动滚动 / 落点 / 还原 / 切合集（50）
 node scripts/compare-mod-dirs.cjs "<A>" "<B>"    # 诊断：两个 mod 目录是否字节一致
 ```
 
 - `test-*.cjs` 用**隔离的 `userData` + 临时目录**跑真实 IPC，**不会**碰游戏目录。
+- 临时目录统一走 `scripts/_tmpdir.cjs` 的 `freshDir()`。以前每个脚本都在模块顶层
+  `rmSync` 固定目录，上一次跑被强行中断时 Chromium 的 GPU 缓存还锁着，`rmSync` 抛的
+  EPERM 没人接，会弹「主进程崩溃」错误框（`force: true` 只压得住"文件不存在"）。
+  现在删不掉就换一个带时间戳的目录，跑得下去优先。目录本身也在 `%TEMP%` 下，
+  所以自检不会往仓库里堆 `tmp-xxx`。
 - 要指定目录时可用环境变量 `BMM_GAME_DIR` / `BMM_WORKSHOP_DIR`。
 - 截图脚本用 `BMM_NO_COVERS=1` 保证截图里不出现工坊封面（版权考虑，用户明确要求）。
 - **`test-i18n-ui.cjs` 测的是"当前 dist 是哪个变体"，所以先构建再跑**：
@@ -93,9 +101,19 @@ node scripts/compare-mod-dirs.cjs "<A>" "<B>"    # 诊断：两个 mod 目录是
 2. 跑上面对应的命令。
 3. `git commit` + 打 tag `v<version>` → 推。
 4. 建 Release：**不要**勾 prerelease、不要 draft。
-   - 完整版：上传 exe + **`latest.yml`**（`.blockmap` 可选，只影响差分更新）。
+   - 完整版：上传 exe + **`latest.yml`** + **`<exe>.blockmap`**。
    - 工坊版：**只传那个 exe**。
-5. 老客户端下次启动会自动更新（`updater.js` + `electron-updater`）。
+5. **先把 Release 点成 Publish，再去验证「检查更新」。**
+   electron-updater 的 GitHub 通道查的是 `/releases/latest`，**draft 和 prerelease 都不在里面** ——
+   草稿状态下客户端一定报"检查更新失败"，而且看起来很像网络问题。
+   （真实踩过：12:43 建草稿 → 12:49 才发布，中间两次检查都失败。）
+6. 老客户端下次启动会自动更新（`updater.js` + `electron-updater`）。
+
+> **`.blockmap` 决定老用户是"差分下载"还是"整包下载"。**
+> `latest.yml` 只描述安装包本身；块级差分要靠服务端同时提供 `<exe>.blockmap`
+>（electron-builder 会在 `release\` 里生成，约 80 KB）。
+> 缺了它就只能整包下载（当前 ~78 MB）。本地历史 Releases 从未传过 `.blockmap`，
+> 所以**别在更新提示里写"不用重下整个安装包"** —— 除非确认 `.blockmap` 已上传。
 
 **发布约定：把工坊版安装包也放进「最新那个 Release」。**
 GitHub 的 Release 列表里最新的一直在最上面，用户找起来方便，所以每条 Release 都同时放
@@ -122,13 +140,21 @@ GitHub 的 Release 列表里最新的一直在最上面，用户找起来方便�
 如果只是为了修 `latest.yml`，**不要重新打包**：完整版那份以 GitHub Release 上的为准，
 用 `scripts/tmp-fetch-latest-yml.cjs` 取回来覆盖本地即可（它会比对 sha256）。
 
+> ⚠️ **在本机自检"打包后的 exe 能不能启动"时，别直接运行 `release-ws\win-unpacked\` 里那个。**
+> 实测（2026-10）从该目录启动会立刻以 `0x80000003`（STATUS_BREAKPOINT）退出，而**同一套文件
+> 复制到 `%TEMP%` 里跑就完全正常**；`release\` 里完整版那个倒是能直接跑。
+> 结论：这是本机目录 ACL / 沙箱拦截的差异，**不是产物问题**，安装到 `%LOCALAPPDATA%\Programs\`
+> 之后不受影响（用户装的就是这同一批文件）。
+> 验证办法：`Copy-Item release-ws\win-unpacked\* $env:TEMP\ws\ -Recurse` 再运行 `%TEMP%\ws` 里的 exe。
+> 另外加 `--no-sandbox` 也能绕过这个现象，但那只是绕过，别拿它当作"能启动"的证明。
+
 **推送由用户手动做。** 本机 `git push` 被 Windows schannel 拦（TLS 握手失败），
 可用 `git -c http.sslBackend=openssl push origin main --follow-tags` 绕过（需提权，
 Git for Windows 要 fork `sh` 建命名管道）。流程一直是：我提交 → 用户推。
 
 ### 1.5 版本历史
 
-`0.3.0 → 0.3.2 → 0.0.x-beta（浏览工坊/描述/分享这一串）→ 0.4.0（全部整合，去掉 (beta) 标签，当前）`
+`0.3.0 → 0.3.2 → 0.0.x-beta（浏览工坊/描述/分享这一串）→ 0.4.0（全部整合，去掉 (beta) 标签）→ 0.4.1 → 0.4.2 → 0.4.3（双语界面/英文 README）→ 0.4.4（合集拖拽与标签、封面、自定义名字）`
 
 `updater.js` 里 `isPrerelease()`（版本号含 `-`）会让**预发布版不检查更新**——用于 beta 阶段避免打扰正式版用户，现在是正式版所以不生效。
 
@@ -159,7 +185,7 @@ Git for Windows 要 fork `sh` 建命名管道）。流程一直是：我提交 �
 且**不要在两个片段里定义同名 key**（合并时后者静默覆盖前者）。
 新画面建议**单开一个片段文件**（像 `browse.ts` 那样），这样多人/多 agent 并行翻译时不会互相覆盖。
 
-**三条容易踩的规则**：
+**四条容易踩的规则**：
 
 1. **当"键"用的字符串不能翻译。** 中文不只是文案，有些还是**数据主键**：
    - `LibraryView` 的分类筛选哨兵（`ALL_CATS`，以前直接用 `'全部'` 当状态值 —— 一翻就散架）；
@@ -171,6 +197,10 @@ Git for Windows 要 fork `sh` 建命名管道）。流程一直是：我提交 �
 3. **模块级常量里不能直接调 `t()`。** 例如 `SettingsView` 的 `ROWS` 存的是 `labelKey/hintKey`，
    渲染时才 `t(...)` —— 因为 App 在 `useState` 初始化里才 `setLang()`，模块求值发生在它之前，
    直接调会把文案钉死在导入时的语言上。
+4. **`ModInfo.name` 是"给人看的显示名"，要当数据用就取 `realName`。**
+   用户能给 mod 起自定义名（`names.json`，扫描时盖掉 `name`），
+   但存档里记的是 contentpackage **真名**、关键词自动分类也按真名算 ——
+   这两处必须写 `m.realName || m.name`。判断标准：这个字符串是显示用，还是拿去比对/查表？
 
 **语言怎么定**：`loadSavedLang()` 读 `localStorage['bmm.lang']`；没有就按系统语言
 **检测一次并立刻落盘**（`detectLang()`：`zh-*` → 中文（含繁体），其余 → 英文），之后不再跟随系统。
@@ -221,7 +251,7 @@ Git for Windows 要 fork `sh` 建命名管道）。流程一直是：我提交 �
 | `.acf` | `D:\steam\steamapps\workshop\appworkshop_602960.acf` |
 | `config_player.xml` | `D:\steam\steamapps\common\Barotrauma\config_player.xml`（**在游戏目录，不在 AppData**，11302 B） |
 | 存档 | `%LOCALAPPDATA%\Daedalic Entertainment GmbH\Barotrauma\*.save`（同目录还有 `ModData`/`ModConfigs`/`Multiplayer`） |
-| 管理器 userData | `%APPDATA%\潜渊症Mod管理器`（`categories.json`、`relations.json`、`steam-api-key.json`、`workshop-checks.json`、`previews/`、`workshop-pages/`、`translations/`；**当前没有 settings.json**，说明目录全用自动检测值） |
+| 管理器 userData | `%APPDATA%\潜渊症Mod管理器`（`categories.json`、`relations.json`、`names.json`（自定义显示名）、`covers/`（手动封面）、`steam-api-key.json`、`workshop-checks.json`、`previews/`、`workshop-pages/`、`translations/`；**当前没有 settings.json**，说明目录全用自动检测值） |
 | 应用备份目录 | `LocalMods` 同级 `ModManagerBackups\`（同盘改名，瞬时且不占额外空间） |
 
 ---

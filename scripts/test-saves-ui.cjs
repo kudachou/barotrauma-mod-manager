@@ -15,8 +15,8 @@ app.commandLine.appendSwitch('disable-gpu');
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.disableHardwareAcceleration();
 
-const TMP = path.join(ROOT, 'tmp-saves-ui');
-fs.rmSync(TMP, { recursive: true, force: true });
+const { freshDir } = require('./_tmpdir.cjs');
+const TMP = freshDir(path.join(ROOT, 'tmp-saves-ui'));
 
 const USERDATA = path.join(TMP, 'userdata');
 const GAME = path.join(TMP, 'game');

@@ -1,42 +1,62 @@
-[b]A mod manager for Barotrauma[/b] — drag to arrange load order, apply collections in one click, import/export collections, tag mods, compare local vs Workshop versions, sync Steam-downloaded updates into the game, back up and roll back mods. English and Chinese interface.
+[h1]Barotrauma Mod Manager[/h1]
 
-Source: [url=https://github.com/kudachou/barotrauma-mod-manager]GitHub[/url] · [url=https://github.com/kudachou/barotrauma-mod-manager/releases]Releases[/url]
+A Windows desktop app for managing your local and Workshop mods. It is not an in-game mod, it is a separate program.
 
-[h2]This is a tool, not a mod[/h2]
-A standalone desktop application. [b]Do not enable it in your mod list, and do not put it on a server.[/b]
-
-[h2]Install[/h2]
-[list]
-[*]Subscribe and let Steam finish downloading.
-[*]In Steam, right-click Barotrauma → Manage → Browse local files (this opens [code]steamapps\common\Barotrauma[/code]) → go up to [code]steamapps[/code] → [code]workshop\content\602960\[/code] → open the folder named [b]3817971486[/b] (this item).
-[*]Run [b]setup.cmd[/b], or just double-click the installer next to it (the .exe whose name starts with [code]barotrauma-mod-manager-workshop-setup-[/code]).
-[/list]
-You do not need to have launched the game — the files are already in that Steam folder. (If you have launched it, the same files are also copied to [code]%LOCALAPPDATA%\Daedalic Entertainment GmbH\Barotrauma\WorkshopMods\Installed\3817971486\[/code]. Either location works.)
-
-[h2]Updating[/h2]
-Install once and you never touch the installer again. After Steam updates this item, [b]just open the installed manager once[/b]: it notices the new version in the Workshop folder and shows a banner — "Workshop updated to vX.X.X". Click [b]Update now[/b] and it upgrades and reopens itself. No hunting for an installer, no replacing files by hand.
+You know the routine: tick every mod by hand before you play, drag them into order, come back a month later and a mod has been deleted by its author so your save won't open, or Steam updated something and your install is still on the old copy. This tool lays all of that out in front of you.
 
 [h2]What it does[/h2]
+
 [list]
-[*][b]Collections[/b] — works on the game's own [code]ModLists\*.xml[/code]. Drag to reorder, apply in one click ([code]config_player.xml[/code] is backed up first).
-[*][b]Import / export collections[/b] — export as the game's native [code]ModLists\*.xml[/code] (usable by friends who do not have this manager), as JSON carrying the most information (names and links even for mods you have not subscribed to), or as plain text you can paste straight into chat. Importing fills in titles automatically and lists the mods you do not have yet, one click each to subscribe on the Workshop.
-[*][b]Local ↔ Workshop[/b] — version comparison; overwrite the local copy with the Workshop version (snapshot first), or copy it to a new local mod.
-[*][b]Sync into game[/b] — install the updates Steam already downloaded, without making Steam re-download whole packs.
-[*][b]Saves[/b] — see which mods a save had enabled, and which collection reproduces it.
-[*][b]Backups[/b] — copy every Workshop mod locally; per-mod snapshots with rollback.
-[*][b]Tags[/b] — keyword auto-categorisation (15 built-in categories) plus your own tags. A mod can carry several, click a tag to filter, and each tag gets its own colour. Deleting a tag removes it from every mod — type the same name again to restore it.
+[*]Collections: works on the game's own ModLists\*.xml. Drag to reorder, apply in one click. config_player.xml is backed up before it is written.
+[*]Import and export: export as the game's native xml (usable by people who do not have this app), as json with names and links, or as plain text you can paste into chat. Importing fills in the mod names, lists the ones you have not subscribed to, and gives you a link to each Workshop page.
+[*]Local vs Workshop: see which copy is newer, overwrite the local one with the Workshop version, or copy it out as a new local mod. A snapshot is taken first.
+[*]Sync into game: install updates Steam already downloaded, instead of letting Steam pull whole packs again.
+[*]Saves: see which mods a save had enabled, and which collection reproduces it.
+[*]Backups: copy every Workshop mod to your machine in one go. Individual mods can be snapshotted and rolled back at any time.
+[*]Tags: automatic sorting by keyword, plus your own tags. A mod can carry several, click a tag to filter.
 [*]Covers, search, source filters, sorting.
 [/list]
 
-[h2]Access[/h2]
-[b]Reads[/b]: the Barotrauma folder you point it at, this user's mod and config folders, and Steam's manifest files. [b]Writes[/b]: only the game folders you choose, plus [code]%APPDATA%\潜渊症Mod管理器[/code]. Online features use Steam's public Workshop API and pages — [b]this edition needs no API key and does not include the Browse Workshop page[/b].
+[h2]Installing[/h2]
 
-[b]No process enumeration. No registry writes. No browser or credential access. No telemetry. No administrator rights.[/b] These are limits in our code, not an OS sandbox. Full list in the [url=https://github.com/kudachou/barotrauma-mod-manager/blob/main/README.en.md]README[/url].
+[list]
+[*]Subscribe to this item and let Steam finish downloading.
+[*]In Steam, right-click Barotrauma, Manage, Browse local files (this opens steamapps\common\Barotrauma). Go up one level to steamapps, then into workshop\content\602960\3817971486.
+[*]Run setup.cmd, or just double-click the setup.exe next to it.
+[/list]
+
+A desktop shortcut is created when it finishes. It installs per user and does not ask for admin rights.
+
+You do not need to have launched the game. The files are already in that Steam folder. If you have launched it, the same files also get copied to %LOCALAPPDATA%\Daedalic Entertainment GmbH\Barotrauma\WorkshopMods\Installed\3817971486. Either location works.
+
+[h2]Updating[/h2]
+
+After Steam updates this item, just open the app once. It notices the new version, and one click upgrades and reopens it. No hunting for installers.
+
+[h2]It is a tool, not a mod[/h2]
+
+Do not enable it in your mod list and do not put it on a server.
+
+[h2]What it reads and writes[/h2]
+
+Reads: the game folder you point it at, your mod and config folders, and Steam's manifest files.
+
+Writes: only the game folder you chose, plus %APPDATA%\潜渊症Mod管理器.
+
+Online: only Steam's public Workshop API and pages. This edition needs no Steam Web API key and does not include Browse Workshop.
+
+No process enumeration, no registry writes, no browser or credential access, no telemetry, no admin rights. Those are limits in our code, not an OS sandbox.
+
+[h2]Elsewhere[/h2]
+
+There is a fuller version on GitHub with Browse Workshop (search mods, view screenshots and descriptions inside the app) and a delisted-mod check. Few people use them and I cannot confirm they work on other machines, so they are not in this item. If you want to try it, see github.com/kudachou/barotrauma-mod-manager/releases - the installer whose filename does not contain workshop is the full edition, and it needs your own Steam Web API key.
 
 [h2]Feedback[/h2]
-Comments or [url=https://github.com/kudachou/barotrauma-mod-manager/issues]GitHub Issues[/url]. Please include the version, the steps you took, and the exact message you saw.
 
-[h2]A version with more features lives on GitHub[/h2]
-GitHub also ships a version with more features — for example [b]browsing the Workshop[/b]: search, filter by category, screenshot gallery and the Chinese description, all inside the manager. But [b]I cannot confirm those features work reliably[/b]: few people use them and feedback is scarce, so there is not enough verification behind them. That is why [b]they are not included in this Workshop edition[/b]. If you want to try it, see [url=https://github.com/kudachou/barotrauma-mod-manager/releases]Releases[/url] — the installer whose filename does [b]not[/b] contain [code]workshop[/code]. Note that it needs your own Steam Web API key, and requires that your browser can already open the Workshop.
+Source: [url=https://github.com/kudachou/barotrauma-mod-manager]github.com/kudachou/barotrauma-mod-manager[/url]
 
-[i]AI assistance was used during development. Everything the tool does is listed above — if you find anything that does not match, please report it.[/i]
+Bug reports: [url=https://github.com/kudachou/barotrauma-mod-manager/issues]GitHub Issues[/url], or just leave a comment here.
+
+Version number, what you did, and the exact error text make it much easier to look into.
+
+AI assistance was used during development.

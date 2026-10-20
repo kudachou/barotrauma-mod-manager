@@ -34,6 +34,13 @@ export const collectionsZh = {
   'collections.exportTip': '导出这个合集（.xml 连没装本管理器的人也能用）',
   'collections.exportBtn': '导出',
   'collections.deleteTip': '删除该合集',
+  'collections.revertBtn': '还原',
+  'collections.revertTip': '丢掉没保存的改动，回到上次保存的样子',
+  'collections.revertedTitle': '已还原',
+  'collections.revertedBody': '没保存的改动丢掉了，这个合集回到上次保存时的样子',
+  'collections.revertFailed': '还原失败',
+  'collections.discardTitle': '已丢弃未保存的改动',
+  'collections.discardBody': '切换到别的合集之前，刚才那个合集按上次保存的内容还原了',
   'collections.applyBtn': '应用到游戏',
 
   // ------------------------------ 编辑器：条目列表 ------------------------------
@@ -110,6 +117,14 @@ export const collectionsEn: Record<keyof typeof collectionsZh, string> = {
     'Export this collection (the .xml also works for people who do not have this manager installed)',
   'collections.exportBtn': 'Export',
   'collections.deleteTip': 'Delete this collection',
+  'collections.revertBtn': 'Revert',
+  'collections.revertTip': 'Drop unsaved changes and go back to the last saved version',
+  'collections.revertedTitle': 'Reverted',
+  'collections.revertedBody': 'Unsaved changes were dropped; this collection is back to its last saved version',
+  'collections.revertFailed': 'Could not revert',
+  'collections.discardTitle': 'Unsaved changes discarded',
+  'collections.discardBody':
+    'The collection you were editing was restored to its last saved version before switching',
   'collections.applyBtn': 'Apply to game',
 
   'collections.dragHint': 'Drag to reorder (the order is the load order — entries further down load later)',
